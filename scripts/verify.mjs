@@ -65,7 +65,7 @@ async function smokeTest() {
   const port = await findAvailablePort();
   const child = spawn(process.execPath, [
     "--enable-source-maps",
-    new URL("artifacts/api-server/dist/index.mjs", rootDir),
+    "./dist/index.mjs",
   ], {
     cwd: new URL("artifacts/api-server", rootDir),
     env: { ...process.env, NODE_ENV: "production", PORT: String(port) },
