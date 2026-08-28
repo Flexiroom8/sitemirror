@@ -94,7 +94,9 @@ async function smokeTest() {
 try {
   await run(pnpmCommand, ["install", "--frozen-lockfile"]);
   await run(pnpmCommand, ["run", "typecheck"]);
-  await run(pnpmCommand, ["-r", "--if-present", "run", "build"]);
+  await run(pnpmCommand, ["-r", "--if-present", "run", "build"], {
+    env: { ...process.env, PORT: process.env.PORT ?? "4173", BASE_PATH: process.env.BASE_PATH ?? "/" },
+  });
   await smokeTest();
   console.log("Verification passed.");
 } catch (error) {
