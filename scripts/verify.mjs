@@ -63,8 +63,11 @@ async function waitForHealth(url, timeoutMs = 10_000) {
 
 async function smokeTest() {
   const port = await findAvailablePort();
-  const child = spawn(pnpmCommand, ["--filter", "@workspace/api-server", "run", "start"], {
-    cwd: rootDir,
+  const child = spawn(process.execPath, [
+    "--enable-source-maps",
+    new URL("artifacts/api-server/dist/index.mjs", rootDir),
+  ], {
+    cwd: new URL("artifacts/api-server", rootDir),
     env: { ...process.env, NODE_ENV: "production", PORT: String(port) },
     stdio: "inherit",
     shell: false,
