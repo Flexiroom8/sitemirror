@@ -1,1 +1,0 @@
-- [Puppeteer runtime](puppeteer-runtime.md) — Puppeteer Chrome needs both a downloaded browser and Linux shared libraries in this environment.
