@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Site Mirror"
+description = "A browser-based tool for creating local, authorized copies of websites you own or have permission to archive, with same-origin crawling, progress tracking, and downloadable exports."
+version = "1.0.0"
+id = "artifacts/site-mirror"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19316
+
+[services.development]
+run = "pnpm --filter @workspace/site-mirror run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/site-mirror", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/site-mirror/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19316"
+BASE_PATH = "/"
