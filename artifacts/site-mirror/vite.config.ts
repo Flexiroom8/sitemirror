@@ -14,7 +14,7 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 const basePath = process.env.BASE_PATH ?? '/';
-const apiUrl = process.env.API_URL ?? 'http://127.0.0.1:5000';
+const apiUrl = process.env.VITE_API_URL ?? process.env.API_URL ?? 'http://127.0.0.1:5000';
 
 export default defineConfig({
   base: basePath,
@@ -72,5 +72,11 @@ export default defineConfig({
     port,
     host: '0.0.0.0',
     allowedHosts: true,
+    proxy: {
+      '/api': {
+        target: apiUrl,
+        changeOrigin: true,
+      },
+    },
   },
 });
