@@ -7,6 +7,11 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
+// Replit's public endpoint sits behind one forwarding proxy. Trusting exactly
+// that hop lets express-rate-limit use the real client address without
+// allowing arbitrary user-supplied proxy chains to influence the key.
+app.set("trust proxy", 1);
+
 app.use(
   helmet({
     // This process only ever serves a JSON API (the frontend is a

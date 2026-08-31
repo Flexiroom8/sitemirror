@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { lookup } from "node:dns/promises";
@@ -61,15 +61,51 @@ const BLOCKED_RESOURCE_TYPES = new Set(["image", "media", "font", "stylesheet"])
 
 const jobs = new Map<string, MirrorJobRecord>();
 const tempRoot = path.join(os.tmpdir(), "site-mirror-jobs");
-let browserReadyPromise: Promise<void> | undefined;
+let browserReadyPromise: Promise<string> | undefined;
 
-async function ensureBrowserAvailable(): Promise<void> {
+function findSystemBrowser(): string | undefined {
+  const candidates = [
+    process.env["PUPPETEER_EXECUTABLE_PATH"],
+    process.env["CHROME_BIN"],
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const candidate of candidates) {
+    try {
+      const result = spawnSync("test", ["-x", candidate], { stdio: "ignore" });
+      if (result.status === 0) return candidate;
+    } catch {
+      // Keep looking; the deployment may expose only one browser location.
+    }
+  }
+
+  for (const command of ["chromium", "chromium-browser", "google-chrome", "google-chrome-stable"]) {
+    try {
+      const result = spawnSync("which", [command], { encoding: "utf8" });
+      if (result.status === 0 && result.stdout.trim()) return result.stdout.trim();
+    } catch {
+      // Keep looking.
+    }
+  }
+
+  return undefined;
+}
+
+async function ensureBrowserAvailable(): Promise<string> {
   if (!browserReadyPromise) {
     browserReadyPromise = (async () => {
       try {
         await fs.access(puppeteer.executablePath());
-        return;
+        return puppeteer.executablePath();
       } catch {
+        const systemBrowser = findSystemBrowser();
+        if (systemBrowser) {
+          logger.info({ executablePath: systemBrowser }, "Using system browser for mirror jobs");
+          return systemBrowser;
+        }
         logger.info("Chrome is unavailable; installing it for mirror jobs");
         await new Promise<void>((resolve, reject) => {
           const installer = spawn(
@@ -129,6 +165,7 @@ async function ensureBrowserAvailable(): Promise<void> {
         });
         await fs.access(puppeteer.executablePath());
         logger.info("Chrome is ready for mirror jobs");
+        return puppeteer.executablePath();
       }
     })().catch((error) => {
       browserReadyPromise = undefined;
@@ -563,13 +600,14 @@ async function runJob(job: MirrorJobRecord): Promise<void> {
   const robots = job.respectRobotsTxt ? await loadRobots(origin) : { rules: [], crawlDelayMs: null };
   const effectiveDelayMs = Math.min(Math.max(job.requestDelayMs, robots.crawlDelayMs ?? 0), 30_000);
   job.message = "Preparing browser.";
-  await ensureBrowserAvailable();
+  const executablePath = await ensureBrowserAvailable();
 
   const queue: Array<{ url: string; depth: number }> = [{ url: origin.href, depth: 0 }];
   const queuedUrls = new Set([origin.href]);
   const seen = new Set<string>();
   job.message = "Launching browser.";
   const browser = await puppeteer.launch({
+    executablePath,
     headless: true,
     args: [
       "--no-sandbox",
