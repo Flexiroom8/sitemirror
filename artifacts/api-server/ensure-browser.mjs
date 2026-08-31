@@ -9,7 +9,15 @@ try {
 } catch {
   const result = spawnSync(
     "pnpm",
-    ["exec", "puppeteer", "browsers", "install", "chrome"],
+    [
+      "--filter",
+      "@workspace/api-server",
+      "exec",
+      "puppeteer",
+      "browsers",
+      "install",
+      "chrome",
+    ],
     { stdio: "inherit" },
   );
 

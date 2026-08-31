@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
+import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { lookup } from "node:dns/promises";
@@ -59,6 +60,55 @@ const BLOCKED_RESOURCE_TYPES = new Set(["image", "media", "font", "stylesheet"])
 
 const jobs = new Map<string, MirrorJobRecord>();
 const tempRoot = path.join(os.tmpdir(), "site-mirror-jobs");
+let browserReadyPromise: Promise<void> | undefined;
+
+async function ensureBrowserAvailable(): Promise<void> {
+  if (!browserReadyPromise) {
+    browserReadyPromise = (async () => {
+      try {
+        await fs.access(puppeteer.executablePath());
+        return;
+      } catch {
+        await new Promise<void>((resolve, reject) => {
+          const installer = spawn(
+            "pnpm",
+            [
+              "--filter",
+              "@workspace/api-server",
+              "exec",
+              "puppeteer",
+              "browsers",
+              "install",
+              "chrome",
+            ],
+            { cwd: process.cwd(), stdio: ["ignore", "ignore", "pipe"] },
+          );
+          let errorOutput = "";
+          installer.stderr.on("data", (chunk: Buffer) => {
+            errorOutput += chunk.toString();
+          });
+          installer.once("error", reject);
+          installer.once("close", (code) => {
+            if (code === 0) {
+              resolve();
+            } else {
+              reject(
+                new Error(
+                  `Chrome could not be installed automatically.${errorOutput.trim() ? ` ${errorOutput.trim()}` : ""}`,
+                ),
+              );
+            }
+          });
+        });
+        await fs.access(puppeteer.executablePath());
+      }
+    })().catch((error) => {
+      browserReadyPromise = undefined;
+      throw error;
+    });
+  }
+  return browserReadyPromise;
+}
 
 // --- Tunables (env-overridable, with safe defaults and hard ceilings) -----
 
@@ -482,6 +532,7 @@ async function runJob(job: MirrorJobRecord): Promise<void> {
   const origin = await assertSafePublicUrl(job.url);
   const robots = job.respectRobotsTxt ? await loadRobots(origin) : { rules: [], crawlDelayMs: null };
   const effectiveDelayMs = Math.min(Math.max(job.requestDelayMs, robots.crawlDelayMs ?? 0), 30_000);
+  await ensureBrowserAvailable();
 
   const queue: Array<{ url: string; depth: number }> = [{ url: origin.href, depth: 0 }];
   const queuedUrls = new Set([origin.href]);
