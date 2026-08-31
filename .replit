@@ -15,3 +15,6 @@ externalPort = 80
 [nix]
 channel = "stable-25_05"
 packages = ["xorg.libxshmfence", "xorg.libXtst", "xorg.libXScrnSaver", "xorg.libXrender", "xorg.libXi", "xorg.libxcb", "xorg.libXrandr", "xorg.libXfixes", "xorg.libXext", "xorg.libXdamage", "xorg.libXcomposite", "xorg.libX11", "alsa-lib", "gtk3", "cairo", "pango", "libxkbcommon", "libgbm", "mesa", "libdrm", "expat", "dbus", "cups", "at-spi2-core", "at-spi2-atk", "atk", "nspr", "nss", "glib"]
+
+[deployment]
+deploymentTarget = "autoscale"
