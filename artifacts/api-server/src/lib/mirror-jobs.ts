@@ -51,6 +51,7 @@ export type MirrorJobRecord = {
 
 const MIRROR_USER_AGENT = "SiteMirror/1.0 (authorized archive)";
 const NAV_TIMEOUT_MS = 30_000;
+const BROWSER_INSTALL_TIMEOUT_MS = 120_000;
 
 // Resource types we let the browser skip while navigating: we don't need a
 // visual render, only the DOM, and every asset we care about is fetched
@@ -69,6 +70,7 @@ async function ensureBrowserAvailable(): Promise<void> {
         await fs.access(puppeteer.executablePath());
         return;
       } catch {
+        logger.info("Chrome is unavailable; installing it for mirror jobs");
         await new Promise<void>((resolve, reject) => {
           const installer = spawn(
             "pnpm",
@@ -91,23 +93,42 @@ async function ensureBrowserAvailable(): Promise<void> {
             },
           );
           let errorOutput = "";
+          let settled = false;
+          const timeout = setTimeout(() => {
+            installer.kill("SIGTERM");
+            if (!settled) {
+              settled = true;
+              reject(new Error("Chrome installation timed out after two minutes."));
+            }
+          }, BROWSER_INSTALL_TIMEOUT_MS);
+          const finish = (callback: () => void) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            callback();
+          };
           installer.stderr.on("data", (chunk: Buffer) => {
             errorOutput += chunk.toString();
           });
-          installer.once("error", reject);
+          installer.once("error", (error) => {
+            finish(() => reject(error));
+          });
           installer.once("close", (code) => {
             if (code === 0) {
-              resolve();
+              finish(resolve);
             } else {
-              reject(
-                new Error(
-                  `Chrome could not be installed automatically.${errorOutput.trim() ? ` ${errorOutput.trim()}` : ""}`,
+              finish(() =>
+                reject(
+                  new Error(
+                    `Chrome could not be installed automatically.${errorOutput.trim() ? ` ${errorOutput.trim()}` : ""}`,
+                  ),
                 ),
               );
             }
           });
         });
         await fs.access(puppeteer.executablePath());
+        logger.info("Chrome is ready for mirror jobs");
       }
     })().catch((error) => {
       browserReadyPromise = undefined;
@@ -536,14 +557,18 @@ async function configureRequestInterception(page: Page, job: MirrorJobRecord): P
 }
 
 async function runJob(job: MirrorJobRecord): Promise<void> {
+  job.message = "Checking URL safety.";
   const origin = await assertSafePublicUrl(job.url);
+  job.message = "Checking robots.txt.";
   const robots = job.respectRobotsTxt ? await loadRobots(origin) : { rules: [], crawlDelayMs: null };
   const effectiveDelayMs = Math.min(Math.max(job.requestDelayMs, robots.crawlDelayMs ?? 0), 30_000);
+  job.message = "Preparing browser.";
   await ensureBrowserAvailable();
 
   const queue: Array<{ url: string; depth: number }> = [{ url: origin.href, depth: 0 }];
   const queuedUrls = new Set([origin.href]);
   const seen = new Set<string>();
+  job.message = "Launching browser.";
   const browser = await puppeteer.launch({
     headless: true,
     args: [
@@ -556,12 +581,16 @@ async function runJob(job: MirrorJobRecord): Promise<void> {
       "--disable-background-timer-throttling",
       "--disable-renderer-backgrounding",
       "--disable-features=Translate,BackForwardCache",
+      "--no-zygote",
+      "--single-process",
     ],
+    timeout: 30_000,
   });
   job.browser = browser;
   const page = await browser.newPage();
   page.setDefaultNavigationTimeout(NAV_TIMEOUT_MS);
   await configureRequestInterception(page, job);
+  job.message = "Opening the starting page.";
 
   try {
     while (queue.length > 0 && seen.size < job.maxPages) {
