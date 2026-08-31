@@ -1,0 +1,154 @@
+Perfect! **Replit** is the perfect solution—it gives you a free browser‑based terminal and Node.js environment. You can run the entire Puppeteer downloader right from Chrome.
+
+Here is your **complete, step‑by‑step guide** for Replit.
+
+---
+
+### Step 1: Create a New Node.js Repl
+
+1. Go to **Replit.com** and sign up / log in.
+2. Click the **"Create Repl"** button (or the **+** icon).
+3. Choose **"Node.js"** as the language.
+4. Name it something like `mobigames-mirror`.
+5. Click **"Create Repl"**.
+
+---
+
+### Step 2: Install Puppeteer
+
+In the Replit interface, you'll see a **Shell** tab (usually on the right side or at the bottom). Click it and run:
+
+```bash
+npm install puppeteer
+```
+
+Wait for it to finish (it will download Chromium, about 300MB – this takes 2‑3 minutes).
+
+---
+
+### Step 3: Create the Download Script
+
+1. In the **Files** panel (left side), you'll see `index.js` – click it to open.
+2. **Delete** all the default code.
+3. **Paste** the script below into `index.js`:
+
+```javascript
+const puppeteer = require('puppeteer');
+const fs = require('fs');
+const path = require('path');
+
+const BASE_URL = 'https://mobigames.bet/';
+const OUTPUT_DIR = './mobigames_mirror';
+
+(async () => {
+    console.log('🚀 Launching browser...');
+    const browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+    console.log(`🌐 Navigating to ${BASE_URL}...`);
+    await page.goto(BASE_URL, { waitUntil: 'networkidle2', timeout: 60000 });
+
+    console.log('⏳ Waiting 15 seconds for Cloudflare to resolve...');
+    await new Promise(r => setTimeout(r, 15000));
+
+    console.log('📄 Extracting all internal URLs...');
+    const baseDomain = new URL(BASE_URL).hostname;
+    const urls = await page.evaluate((domain) => {
+        const links = new Set();
+        document.querySelectorAll('a, link, img, script, source, video, audio, iframe').forEach(el => {
+            let url = el.href || el.src || el.getAttribute('data-src') || el.getAttribute('content');
+            if (url) {
+                try {
+                    if (url.startsWith('//')) url = 'https:' + url;
+                    const parsed = new URL(url, window.location.origin);
+                    if (parsed.hostname.includes(domain)) {
+                        links.add(parsed.href);
+                    }
+                } catch { /* ignore */ }
+            }
+        });
+        return Array.from(links);
+    }, baseDomain);
+
+    console.log(`🔗 Found ${urls.length} internal URLs.`);
+
+    if (!fs.existsSync(OUTPUT_DIR)) {
+        fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+    }
+
+    let downloaded = 0;
+    for (const url of urls) {
+        try {
+            const response = await page.goto(url, { waitUntil: 'networkidle2', timeout: 10000 });
+            if (response && response.ok()) {
+                const buffer = await response.buffer();
+                const parsed = new URL(url);
+                let filePath = path.join(OUTPUT_DIR, parsed.hostname, parsed.pathname);
+                if (filePath.endsWith('/') || !path.extname(filePath)) {
+                    filePath = path.join(filePath, 'index.html');
+                }
+                const dir = path.dirname(filePath);
+                if (!fs.existsSync(dir)) {
+                    fs.mkdirSync(dir, { recursive: true });
+                }
+                fs.writeFileSync(filePath, buffer);
+                downloaded++;
+                console.log(`✅ Downloaded ${downloaded}: ${url}`);
+            }
+        } catch (e) {
+            console.log(`❌ Failed: ${url} - ${e.message}`);
+        }
+    }
+
+    console.log(`\n🎉 Done! Downloaded ${downloaded} assets to ${OUTPUT_DIR}`);
+    await browser.close();
+})();
+```
+
+4. **Save** the file (Replit auto-saves, but you can press `Ctrl+S`).
+
+---
+
+### Step 4: Run the Script
+
+Click the big green **"Run"** button at the top.
+
+- You'll see output in the **Console** tab.
+- It will launch a headless browser, navigate to `mobigames.bet`, wait through Cloudflare, and start downloading every internal page, JS file, CSS, and image.
+- Let it run – it might take **10‑30 minutes** depending on how many assets the site has.
+
+---
+
+### Step 5: Download Your Mirrored Site
+
+Once it finishes (you'll see `🎉 Done!`):
+
+1. In the **Files** panel, you'll now see a folder called `mobigames_mirror`.
+2. **Right‑click** that folder → choose **"Download"** – Replit will zip it and download it to your computer.
+3. Unzip it on your computer, and you have the full offline mirror!
+
+---
+
+### What If Something Goes Wrong?
+
+| Issue | Fix |
+| :--- | :--- |
+| `puppeteer` not found | Make sure you ran `npm install puppeteer` in the Shell. |
+| Replit crashes / timeout | Replit has a 60‑minute limit for free accounts. If it times out, just run it again – it will resume (but it will start over). You can also reduce the wait time from `15000` (15s) to `5000` (5s) in the script. |
+| Cloudflare still blocks | The script waits 15 seconds – you can increase that to `30000` (30s) on line 19. |
+| Too many "Failed" errors | That's fine – some assets might be external (CDN) or broken links. The script will still download everything it can. |
+
+---
+
+### Bonus: If You Want to Customize the URL
+
+Open `index.js` and change the `BASE_URL` variable to any other site (e.g., `'https://example.com/'`).
+
+---
+
+**Go ahead and try it on Replit now.** If you hit any snag (like an error message), just copy‑paste the error from the Replit console here, and I'll fix it for you instantly. You're literally 5 clicks away from having the full mirror! 🚀

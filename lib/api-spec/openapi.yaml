@@ -1,0 +1,305 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: mirror
+    description: Authorized website mirror jobs
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /mirror-jobs:
+    get:
+      operationId: listMirrorJobs
+      tags: [mirror]
+      summary: List recent mirror jobs
+      description: Returns the most recently created mirror jobs, newest first.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: number
+            multipleOf: 1
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Recent mirror jobs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MirrorJobList"
+    post:
+      operationId: createMirrorJob
+      tags: [mirror]
+      summary: Start an authorized website mirror job
+      description: Begins a same-origin crawl for a website the caller owns or is authorized to archive.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MirrorJobInput"
+      responses:
+        "202":
+          description: Mirror job accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MirrorJob"
+        "400":
+          description: Invalid URL or crawl settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /mirror-jobs/{id}:
+    get:
+      operationId: getMirrorJob
+      tags: [mirror]
+      summary: Get mirror job progress
+      parameters:
+        - $ref: "#/components/parameters/MirrorJobId"
+      responses:
+        "200":
+          description: Mirror job progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MirrorJob"
+        "404":
+          description: Mirror job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /mirror-jobs/{id}/cancel:
+    post:
+      operationId: cancelMirrorJob
+      tags: [mirror]
+      summary: Cancel a queued or running mirror job
+      parameters:
+        - $ref: "#/components/parameters/MirrorJobId"
+      responses:
+        "200":
+          description: Cancelled mirror job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MirrorJob"
+        "404":
+          description: Mirror job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /mirror-jobs/{id}/download:
+    get:
+      operationId: downloadMirrorJob
+      tags: [mirror]
+      summary: Download a completed mirror as a ZIP archive
+      parameters:
+        - $ref: "#/components/parameters/MirrorJobId"
+      responses:
+        "200":
+          description: ZIP archive
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Mirror job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Mirror is not complete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  parameters:
+    MirrorJobId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    MirrorJobInput:
+      type: object
+      properties:
+        url:
+          type: string
+          description: HTTPS or HTTP URL for a site the caller owns or is authorized to archive
+        maxPages:
+          type: number
+          multipleOf: 1
+          minimum: 1
+          maximum: 1000
+          default: 100
+        requestDelayMs:
+          type: number
+          multipleOf: 1
+          minimum: 0
+          maximum: 5000
+          default: 250
+        respectRobotsTxt:
+          type: boolean
+          default: true
+        maxDepth:
+          type: number
+          multipleOf: 1
+          minimum: 0
+          maximum: 10
+          default: 3
+        includeAssets:
+          type: boolean
+          default: true
+        pathPrefix:
+          type: string
+          minLength: 1
+          maxLength: 200
+          default: /
+        excludePaths:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+        timeoutMs:
+          type: number
+          multipleOf: 1
+          minimum: 60000
+          maximum: 3600000
+          default: 900000
+          description: Wall-clock limit for the whole crawl, in milliseconds.
+        maxTotalBytes:
+          type: number
+          multipleOf: 1
+          minimum: 1048576
+          maximum: 2147483648
+          default: 524288000
+          description: Overall archive size cap, in bytes.
+      required:
+        - url
+    MirrorJobList:
+      type: object
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/MirrorJob"
+      required:
+        - jobs
+    MirrorJob:
+      type: object
+      properties:
+        id:
+          type: string
+        url:
+          type: string
+        status:
+          type: string
+          enum: [queued, running, completed, failed, cancelled]
+        pagesFound:
+          type: number
+          multipleOf: 1
+        pagesDownloaded:
+          type: number
+          multipleOf: 1
+        assetsDownloaded:
+          type: number
+          multipleOf: 1
+        bytesDownloaded:
+          type: number
+          multipleOf: 1
+        maxPages:
+          type: number
+          multipleOf: 1
+        requestDelayMs:
+          type: number
+          multipleOf: 1
+        respectRobotsTxt:
+          type: boolean
+        maxDepth:
+          type: number
+          multipleOf: 1
+        includeAssets:
+          type: boolean
+        pathPrefix:
+          type: string
+        excludePaths:
+          type: array
+          items:
+            type: string
+        timeoutMs:
+          type: number
+          multipleOf: 1
+        maxTotalBytes:
+          type: number
+          multipleOf: 1
+        currentUrl:
+          type: ["string", "null"]
+        message:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: ["string", "null"]
+      required:
+        - id
+        - url
+        - status
+        - pagesFound
+        - pagesDownloaded
+        - assetsDownloaded
+        - bytesDownloaded
+        - maxPages
+        - requestDelayMs
+        - respectRobotsTxt
+        - currentUrl
+        - message
+        - createdAt
+        - completedAt
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
