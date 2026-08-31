@@ -22,6 +22,7 @@ import type {
 import type {
   ErrorResponse,
   HealthStatus,
+  ListMirrorJobsParams,
   MirrorJob,
   MirrorJobInput,
   MirrorJobList
@@ -132,16 +133,13 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
 
 
 
-export type ListMirrorJobsParams = {
-limit?: number;
-};
-
 export const getListMirrorJobsUrl = (params?: ListMirrorJobsParams,) => {
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
+
     if (value !== undefined) {
-      normalizedParams.append(key, value === null ? 'null' : value.toString())
+      normalizedParams.append(key, value === null ? 'null' : String(value))
     }
   });
 
@@ -168,10 +166,10 @@ export const listMirrorJobs = async (params?: ListMirrorJobsParams, options?: Pa
 
 
 
+
 export const getListMirrorJobsQueryKey = (params?: ListMirrorJobsParams,) => {
     return [
-    `/api/mirror-jobs`,
-    ...(params ? [params]: [])
+    `/api/mirror-jobs`, ...(params ? [params] : [])
     ] as const;
     }
 
@@ -213,6 +211,7 @@ export function useListMirrorJobs<TData = Awaited<ReturnType<typeof listMirrorJo
 
   return withQueryKey(query, queryOptions.queryKey);
 }
+
 
 
 

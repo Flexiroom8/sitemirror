@@ -8,6 +8,7 @@
 
 export * from './errorResponse';
 export * from './healthStatus';
+export * from './listMirrorJobsParams';
 export * from './mirrorJob';
 export * from './mirrorJobInput';
 export * from './mirrorJobList';
