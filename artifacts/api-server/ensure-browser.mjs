@@ -18,7 +18,13 @@ try {
       "install",
       "chrome",
     ],
-    { stdio: "inherit" },
+    {
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        PUPPETEER_SKIP_DOWNLOAD: "false",
+      },
+    },
   );
 
   if (result.status !== 0) {

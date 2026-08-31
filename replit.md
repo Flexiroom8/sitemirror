@@ -7,6 +7,7 @@ Site Mirror creates downloadable, same-origin website archives for sites the use
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
+- `pnpm --filter @workspace/scripts run verify` — install, build, and smoke-test the workspace
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only; the mirror feature itself doesn't use the DB — see Architecture decisions)
 - Required env: `DATABASE_URL` — Postgres connection string (required by the workspace template; not read by the mirror code path)

@@ -81,7 +81,14 @@ async function ensureBrowserAvailable(): Promise<void> {
               "install",
               "chrome",
             ],
-            { cwd: process.cwd(), stdio: ["ignore", "ignore", "pipe"] },
+            {
+              cwd: process.cwd(),
+              stdio: ["ignore", "ignore", "pipe"],
+              env: {
+                ...process.env,
+                PUPPETEER_SKIP_DOWNLOAD: "false",
+              },
+            },
           );
           let errorOutput = "";
           installer.stderr.on("data", (chunk: Buffer) => {
@@ -539,7 +546,17 @@ async function runJob(job: MirrorJobRecord): Promise<void> {
   const seen = new Set<string>();
   const browser = await puppeteer.launch({
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--disable-software-rasterizer",
+      "--disable-background-networking",
+      "--disable-background-timer-throttling",
+      "--disable-renderer-backgrounding",
+      "--disable-features=Translate,BackForwardCache",
+    ],
   });
   job.browser = browser;
   const page = await browser.newPage();
