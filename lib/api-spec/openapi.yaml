@@ -295,6 +295,8 @@ components:
           format: date-time
         completedAt:
           type: ["string", "null"]
+        archiveAvailable:
+          type: boolean
       required:
         - id
         - url
@@ -315,6 +317,7 @@ components:
         - message
         - createdAt
         - completedAt
+        - archiveAvailable
     ErrorResponse:
       type: object
       properties:

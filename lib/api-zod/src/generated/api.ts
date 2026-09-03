@@ -85,7 +85,8 @@ export const ListMirrorJobsResponse = zod.object({
   "progressPhase": zod.enum(['queued', 'discovering', 'saving', 'downloading_assets', 'rewriting', 'packaging']),
   "message": zod.string().nullable(),
   "createdAt": zod.coerce.date(),
-  "completedAt": zod.string().nullable()
+  "completedAt": zod.string().nullable(),
+  "archiveAvailable": zod.boolean()
 }))
 })
 
@@ -195,7 +196,8 @@ export const CreateMirrorJobResponse = zod.object({
   "progressPhase": zod.enum(['queued', 'discovering', 'saving', 'downloading_assets', 'rewriting', 'packaging']),
   "message": zod.string().nullable(),
   "createdAt": zod.coerce.date(),
-  "completedAt": zod.string().nullable()
+  "completedAt": zod.string().nullable(),
+  "archiveAvailable": zod.boolean()
 })
 
 
@@ -262,7 +264,8 @@ export const GetMirrorJobResponse = zod.object({
   "progressPhase": zod.enum(['queued', 'discovering', 'saving', 'downloading_assets', 'rewriting', 'packaging']),
   "message": zod.string().nullable(),
   "createdAt": zod.coerce.date(),
-  "completedAt": zod.string().nullable()
+  "completedAt": zod.string().nullable(),
+  "archiveAvailable": zod.boolean()
 })
 
 
@@ -329,7 +332,8 @@ export const CancelMirrorJobResponse = zod.object({
   "progressPhase": zod.enum(['queued', 'discovering', 'saving', 'downloading_assets', 'rewriting', 'packaging']),
   "message": zod.string().nullable(),
   "createdAt": zod.coerce.date(),
-  "completedAt": zod.string().nullable()
+  "completedAt": zod.string().nullable(),
+  "archiveAvailable": zod.boolean()
 })
 
 

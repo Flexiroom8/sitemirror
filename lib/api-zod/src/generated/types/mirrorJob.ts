@@ -37,4 +37,5 @@ export interface MirrorJob {
   createdAt: Date;
   /** @nullable */
   completedAt: string | null;
+  archiveAvailable: boolean;
 }

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -8,7 +9,15 @@ import net from "node:net";
 import { URL } from "node:url";
 import puppeteer, { type Browser, type HTTPRequest, type Page } from "puppeteer";
 import archiver from "archiver";
+import { Client as ObjectStorageClient } from "@replit/object-storage";
 import { logger } from "./logger";
+import {
+  deletePersistedMirrorJob,
+  listPersistedMirrorJobs,
+  persistMirrorJob,
+  type MirrorJobConfigSnapshot,
+  type MirrorJobProgressSnapshot,
+} from "./mirror-repository";
 
 export type MirrorStatus =
   | "queued"
@@ -63,6 +72,10 @@ export type MirrorJobRecord = {
   startedAt: Date | null;
   completedAt: string | null;
   outputDir: string;
+  archiveKey: string | null;
+  archiveBytes: number | null;
+  archiveFile: string | null;
+  archiveStorageFailed: boolean;
   cancelRequested: boolean;
   browser: Browser | null;
   downloadedAssets: Set<string>;
@@ -87,6 +100,14 @@ const BLOCKED_RESOURCE_TYPES = new Set(["image", "media", "font", "stylesheet"])
 const jobs = new Map<string, MirrorJobRecord>();
 const tempRoot = path.join(os.tmpdir(), "site-mirror-jobs");
 let browserReadyPromise: Promise<string> | undefined;
+const persistenceTimers = new Map<string, NodeJS.Timeout>();
+const useObjectStorage = process.env.NODE_ENV === "production";
+let objectStorage: ObjectStorageClient | null = null;
+
+function getObjectStorage(): ObjectStorageClient {
+  if (!objectStorage) objectStorage = new ObjectStorageClient();
+  return objectStorage;
+}
 
 function findSystemBrowser(): string | undefined {
   const candidates = [
@@ -340,7 +361,29 @@ function publicJob(job: MirrorJobRecord) {
     message: job.message,
     createdAt: job.createdAt,
     completedAt: job.completedAt,
+    archiveAvailable: Boolean(job.archiveKey) && !job.archiveStorageFailed,
   };
+}
+
+function schedulePersistence(job: MirrorJobRecord): void {
+  if (persistenceTimers.has(job.id)) return;
+  const timer = setTimeout(() => {
+    persistenceTimers.delete(job.id);
+    void persistMirrorJob(job).catch((error) => {
+      logger.warn({ err: error, jobId: job.id }, "Failed to persist mirror job progress");
+    });
+  }, 250);
+  timer.unref?.();
+  persistenceTimers.set(job.id, timer);
+}
+
+async function persistImmediately(job: MirrorJobRecord): Promise<void> {
+  const timer = persistenceTimers.get(job.id);
+  if (timer) {
+    clearTimeout(timer);
+    persistenceTimers.delete(job.id);
+  }
+  await persistMirrorJob(job);
 }
 
 function outcomeKey(kind: MirrorOutcome["kind"], url: string): string {
@@ -372,6 +415,7 @@ function recordOutcome(job: MirrorJobRecord, outcome: Omit<MirrorOutcome, "updat
     if (outcome.status === "skipped") job.assetsSkipped += 1;
     if (outcome.status === "failed") job.assetsFailed += 1;
   }
+  schedulePersistence(job);
 }
 
 function isHtmlContentType(contentType: string | null | undefined): boolean {
@@ -445,6 +489,297 @@ async function writeArchiveReports(job: MirrorJobRecord): Promise<void> {
     fs.writeFile(path.join(job.outputDir, "report.json"), JSON.stringify(report, null, 2)),
     fs.writeFile(path.join(job.outputDir, "README.txt"), readme),
   ]);
+}
+
+function archiveObjectName(job: MirrorJobRecord): string {
+  return `site-mirror/archives/${job.id}.zip`;
+}
+
+async function createArchiveFile(job: MirrorJobRecord): Promise<{ file: string; bytes: number }> {
+  const file = path.join(tempRoot, `${job.id}.zip`);
+  await fs.rm(file, { force: true }).catch(() => undefined);
+
+  await new Promise<void>((resolve, reject) => {
+    const output = createWriteStream(file);
+    const archive = archiver("zip", { zlib: { level: 9 } });
+    let settled = false;
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+    output.once("close", () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    });
+    output.once("error", fail);
+    archive.once("error", fail);
+    archive.pipe(output);
+    archive.directory(job.outputDir, false);
+    void archive.finalize().catch(fail);
+  });
+
+  const stats = await fs.stat(file);
+  return { file, bytes: stats.size };
+}
+
+async function publishArchive(job: MirrorJobRecord): Promise<void> {
+  const archive = await createArchiveFile(job);
+  job.archiveFile = archive.file;
+  job.archiveBytes = archive.bytes;
+
+  if (useObjectStorage) {
+    const objectName = archiveObjectName(job);
+    const result = await getObjectStorage().uploadFromFilename(objectName, archive.file, { compress: false });
+    if (!result.ok) throw new Error(`Archive storage failed: ${result.error.message}`);
+    job.archiveKey = objectName;
+  } else {
+    job.archiveKey = `local:${archive.file}`;
+  }
+  await persistImmediately(job);
+}
+
+async function streamStoredArchive(
+  job: MirrorJobRecord,
+  response: NodeJS.WritableStream,
+): Promise<void> {
+  const source = useObjectStorage && job.archiveKey && !job.archiveKey.startsWith("local:")
+    ? getObjectStorage().downloadAsStream(job.archiveKey)
+    : createReadStream(job.archiveFile ?? job.archiveKey?.replace(/^local:/, "") ?? "");
+
+  await new Promise<void>((resolve, reject) => {
+    source.once("error", reject);
+    response.once("error", reject);
+    response.once("finish", resolve);
+    source.pipe(response);
+  });
+}
+
+async function fetchWithValidatedRedirects(
+  rawUrl: string,
+  origin: URL,
+  job: MirrorJobRecord,
+): Promise<{ response: Response; finalUrl: URL }> {
+  let current = rawUrl;
+  for (let redirectCount = 0; redirectCount <= 8; redirectCount += 1) {
+    const currentUrl = new URL(current);
+    if (!(await isHostnameSafe(currentUrl.hostname))) {
+      throw new Error("The response target is not a public address.");
+    }
+
+    const response = await fetch(current, {
+      signal: AbortSignal.timeout(NAV_TIMEOUT_MS),
+      redirect: "manual",
+      headers: { "User-Agent": MIRROR_USER_AGENT },
+    });
+    const location = response.headers.get("location");
+    if (location && response.status >= 300 && response.status < 400) {
+      const nextUrl = new URL(location, current);
+      if (!sameOrigin(nextUrl, origin) || !withinScope(nextUrl, origin, job)) {
+        throw new Error("The response redirected outside the allowed crawl scope.");
+      }
+      job.redirects.set(rawUrl, nextUrl.href);
+      current = nextUrl.href;
+      continue;
+    }
+
+    const finalUrl = new URL(current);
+    if (!sameOrigin(finalUrl, origin) || !withinScope(finalUrl, origin, job)) {
+      throw new Error("The response ended outside the allowed crawl scope.");
+    }
+    return { response, finalUrl };
+  }
+  throw new Error("The response exceeded the redirect limit.");
+}
+
+function normalizeResourceValues(values: string[], baseUrl: string): string[] {
+  return values
+    .map((value) => {
+      try {
+        const parsed = new URL(value, baseUrl);
+        parsed.hash = "";
+        return parsed.href;
+      } catch {
+        return null;
+      }
+    })
+    .filter((value): value is string => Boolean(value));
+}
+
+function extractMarkupResources(markup: string): { links: string[]; assets: string[] } {
+  const links = new Set<string>();
+  const assets = new Set<string>();
+  const attributePattern =
+    /\b(href|src|poster|data-src)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+  for (const match of markup.matchAll(attributePattern)) {
+    const attribute = match[1]?.toLowerCase();
+    const value = match[2] ?? match[3];
+    if (!value) continue;
+    if (attribute === "href" && /<a\b|<area\b/i.test(markup.slice(Math.max(0, match.index ?? 0) - 32, match.index ?? 0))) {
+      links.add(value);
+    } else if (attribute === "href" && /(?:^|[^\w])(alternate|canonical|stylesheet|icon)/i.test(markup.slice(Math.max(0, match.index ?? 0) - 120, match.index ?? 0))) {
+      assets.add(value);
+    } else if (attribute === "href") {
+      links.add(value);
+    } else {
+      assets.add(value);
+    }
+  }
+
+  const srcsetPattern = /\b(?:srcset)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+  for (const match of markup.matchAll(srcsetPattern)) {
+    for (const candidate of (match[1] ?? match[2] ?? "").split(",")) {
+      const url = candidate.trim().split(/\s+/)[0];
+      if (url) assets.add(url);
+    }
+  }
+  return { links: [...links], assets: [...assets] };
+}
+
+function queueDiscoveredPages(
+  job: MirrorJobRecord,
+  values: string[],
+  baseUrl: string,
+  depth: number,
+  queue: Array<{ url: string; depth: number }>,
+  origin: URL,
+  robots: RobotsRules,
+): void {
+  for (const pageUrl of values) {
+    let parsed: URL;
+    try {
+      parsed = new URL(pageUrl);
+    } catch {
+      continue;
+    }
+    if (!withinScope(parsed, origin, job)) continue;
+    if (job.discoveredUrls.has(pageUrl)) continue;
+
+    job.discoveredUrls.add(pageUrl);
+    job.pagesFound = job.discoveredUrls.size;
+    if (depth >= job.maxDepth) {
+      recordOutcome(job, {
+        kind: "page",
+        url: pageUrl,
+        status: "skipped",
+        httpStatus: null,
+        contentType: null,
+        finalUrl: null,
+        archivePath: null,
+        reason: "maximum link depth reached",
+        attempts: 0,
+        bytes: 0,
+      });
+      continue;
+    }
+    if (job.discoveredUrls.size > job.maxPages) {
+      recordOutcome(job, {
+        kind: "page",
+        url: pageUrl,
+        status: "skipped",
+        httpStatus: null,
+        contentType: null,
+        finalUrl: null,
+        archivePath: null,
+        reason: "page limit reached",
+        attempts: 0,
+        bytes: 0,
+      });
+      continue;
+    }
+    if (blockedByRobots(parsed, robots)) {
+      recordOutcome(job, {
+        kind: "page",
+        url: pageUrl,
+        status: "skipped",
+        httpStatus: null,
+        contentType: null,
+        finalUrl: null,
+        archivePath: null,
+        reason: "blocked by robots.txt",
+        attempts: 0,
+        bytes: 0,
+      });
+      continue;
+    }
+    if (!job.discoveredUrls.has(pageUrl)) continue;
+    queue.push({ url: pageUrl, depth: depth + 1 });
+  }
+}
+
+async function savePageWithFetchFallback(
+  job: MirrorJobRecord,
+  current: string,
+  depth: number,
+  queue: Array<{ url: string; depth: number }>,
+  origin: URL,
+  robots: RobotsRules,
+): Promise<boolean> {
+  const { response, finalUrl } = await fetchWithValidatedRedirects(current, origin, job);
+  const contentType = response.headers.get("content-type");
+  if (!isHtmlContentType(contentType)) {
+    recordOutcome(job, {
+      kind: "page",
+      url: current,
+      status: "skipped",
+      httpStatus: response.status,
+      contentType,
+      finalUrl: finalUrl.href,
+      archivePath: null,
+      reason: "response is not an HTML document",
+      attempts: 1,
+      bytes: 0,
+    });
+    return false;
+  }
+
+  const body = Buffer.from(await response.arrayBuffer());
+  if (body.byteLength > job.maxTotalBytes - job.bytesDownloaded) {
+    job.sizeLimitReached = true;
+    recordOutcome(job, {
+      kind: "page",
+      url: current,
+      status: "skipped",
+      httpStatus: response.status,
+      contentType,
+      finalUrl: finalUrl.href,
+      archivePath: null,
+      reason: "total byte limit reached",
+      attempts: 1,
+      bytes: body.byteLength,
+    });
+    return false;
+  }
+
+  const markup = body.toString("utf8");
+  const resources = extractMarkupResources(markup);
+  queueDiscoveredPages(
+    job,
+    normalizeResourceValues(resources.links, finalUrl.href),
+    finalUrl.href,
+    depth,
+    queue,
+    origin,
+    robots,
+  );
+  await writeFileForUrl(job.outputDir, current, body);
+  job.savedPages.add(current);
+  job.pagesDownloaded += 1;
+  job.bytesDownloaded += body.byteLength;
+  recordOutcome(job, {
+    kind: "page",
+    url: current,
+    status: "saved",
+    httpStatus: response.status,
+    contentType,
+    finalUrl: finalUrl.href,
+    archivePath: filePathForUrl(current),
+    reason: null,
+    attempts: 1,
+    bytes: body.byteLength,
+  });
+  return true;
 }
 
 // A short hash of the query string is appended to the on-disk filename so
@@ -1126,19 +1461,30 @@ async function runJob(job: MirrorJobRecord): Promise<void> {
           bytes: body.byteLength,
         });
       } catch (error) {
-        // A single unavailable page should not fail the rest of the crawl.
-        recordOutcome(job, {
-          kind: "page",
-          url: current,
-          status: "failed",
-          httpStatus: null,
-          contentType: null,
-          finalUrl: null,
-          archivePath: null,
-          reason: error instanceof Error ? error.message : "page request failed",
-          attempts: 1,
-          bytes: 0,
-        });
+        // A browser navigation can fail even when the origin can return a
+        // usable document. Fall back to a validated direct response before
+        // marking the page as failed.
+        try {
+          await savePageWithFetchFallback(job, current, queueEntry.depth, queue, origin, robots);
+        } catch (fallbackError) {
+          recordOutcome(job, {
+            kind: "page",
+            url: current,
+            status: "failed",
+            httpStatus: null,
+            contentType: null,
+            finalUrl: null,
+            archivePath: null,
+            reason:
+              fallbackError instanceof Error
+                ? fallbackError.message
+                : error instanceof Error
+                  ? error.message
+                  : "page request failed",
+            attempts: 2,
+            bytes: 0,
+          });
+        }
         logger.debug({ err: error, url: current, jobId: job.id }, "Failed to crawl page; continuing");
       }
     }
@@ -1169,12 +1515,25 @@ async function runJob(job: MirrorJobRecord): Promise<void> {
       if (job.pagesSkipped || job.assetsSkipped) reasons.push(`${job.pagesSkipped + job.assetsSkipped} skipped`);
       const suffix = reasons.length ? ` (stopped early: ${reasons.join(", ")})` : "";
       job.message = `Saved ${job.pagesDownloaded} page${job.pagesDownloaded === 1 ? "" : "s"} and ${job.assetsDownloaded} asset${job.assetsDownloaded === 1 ? "" : "s"}.${suffix}`;
+      await writeArchiveReports(job);
+      try {
+        await publishArchive(job);
+      } catch (error) {
+        job.archiveStorageFailed = true;
+        job.status = "completed_with_warnings";
+        job.message += " Archive storage is temporarily unavailable.";
+        logger.warn({ err: error, jobId: job.id }, "Failed to publish mirror archive");
+        await persistImmediately(job);
+      }
     }
   } finally {
     job.currentUrl = null;
     job.completedAt = new Date().toISOString();
     job.browser = null;
     await browser.close().catch(() => undefined);
+    await persistImmediately(job).catch((error) => {
+      logger.warn({ err: error, jobId: job.id }, "Failed to persist final mirror job state");
+    });
   }
 }
 
@@ -1198,16 +1557,118 @@ function maybeStartNext(): void {
   }
 }
 
+function hydrateMirrorJob(
+  row: Awaited<ReturnType<typeof listPersistedMirrorJobs>>[number],
+): MirrorJobRecord {
+  const config = row.config as MirrorJobConfigSnapshot;
+  const progress = row.progress as MirrorJobProgressSnapshot;
+  const completedAt = row.completedAt?.toISOString() ?? null;
+  return {
+    id: row.id,
+    url: row.url,
+    status: row.status as MirrorStatus,
+    pagesFound: progress.pagesFound,
+    pagesDownloaded: progress.pagesDownloaded,
+    pagesSkipped: progress.pagesSkipped,
+    pagesFailed: progress.pagesFailed,
+    assetsDownloaded: progress.assetsDownloaded,
+    assetsSkipped: progress.assetsSkipped,
+    assetsFailed: progress.assetsFailed,
+    bytesDownloaded: progress.bytesDownloaded,
+    maxPages: config.maxPages,
+    requestDelayMs: config.requestDelayMs,
+    respectRobotsTxt: config.respectRobotsTxt,
+    maxDepth: config.maxDepth,
+    includeAssets: config.includeAssets,
+    pathPrefix: config.pathPrefix,
+    excludePaths: config.excludePaths,
+    timeoutMs: config.timeoutMs,
+    maxTotalBytes: config.maxTotalBytes,
+    maxAssetBytes: config.maxAssetBytes,
+    currentUrl: progress.currentUrl,
+    progressPhase: progress.progressPhase,
+    message: progress.message,
+    createdAt: row.createdAt,
+    startedAt: row.startedAt,
+    completedAt,
+    outputDir: path.join(tempRoot, row.id),
+    archiveKey: row.archiveKey,
+    archiveBytes: row.archiveBytes,
+    archiveFile: row.archiveKey?.startsWith("local:") ? row.archiveKey.slice("local:".length) : null,
+    archiveStorageFailed: !row.archiveKey && Boolean(completedAt),
+    cancelRequested: false,
+    browser: null,
+    downloadedAssets: new Set(progress.downloadedAssets),
+    savedPages: new Set(progress.savedPages),
+    outcomes: new Map(progress.outcomes.map((outcome) => [outcomeKey(outcome.kind, outcome.url), outcome])),
+    discoveredUrls: new Set(progress.discoveredUrls),
+    redirects: new Map(progress.redirects),
+    timedOut: progress.timedOut,
+    sizeLimitReached: progress.sizeLimitReached,
+  };
+}
+
+export async function initializeMirrorJobs(): Promise<void> {
+  try {
+    const rows = await listPersistedMirrorJobs(100);
+    for (const row of rows) {
+      const job = hydrateMirrorJob(row);
+      if (job.status === "queued" || job.status === "running") {
+        await fs.rm(job.outputDir, { recursive: true, force: true }).catch(() => undefined);
+        await fs.mkdir(job.outputDir, { recursive: true });
+        job.status = "queued";
+        job.startedAt = null;
+        job.completedAt = null;
+        job.currentUrl = null;
+        job.progressPhase = "queued";
+        job.message = "Recovered after a server restart.";
+        job.cancelRequested = false;
+        job.pagesFound = 0;
+        job.pagesDownloaded = 0;
+        job.pagesSkipped = 0;
+        job.pagesFailed = 0;
+        job.assetsDownloaded = 0;
+        job.assetsSkipped = 0;
+        job.assetsFailed = 0;
+        job.bytesDownloaded = 0;
+        job.downloadedAssets.clear();
+        job.savedPages.clear();
+        job.outcomes.clear();
+        job.discoveredUrls.clear();
+        job.redirects.clear();
+        job.archiveKey = null;
+        job.archiveBytes = null;
+        job.archiveFile = null;
+        job.archiveStorageFailed = false;
+        job.timedOut = false;
+        job.sizeLimitReached = false;
+        jobs.set(job.id, job);
+        pendingJobIds.push(job.id);
+        await persistImmediately(job);
+      } else {
+        jobs.set(job.id, job);
+      }
+    }
+    maybeStartNext();
+  } catch (error) {
+    logger.warn({ err: error }, "Mirror history could not be restored; continuing with in-memory jobs");
+  }
+}
+
 async function runJobLifecycle(job: MirrorJobRecord): Promise<void> {
   if (job.cancelRequested) {
     job.status = "cancelled";
     job.message = "Cancelled before it started.";
     job.completedAt = new Date().toISOString();
+    await persistImmediately(job).catch(() => undefined);
     return;
   }
   job.status = "running";
   job.startedAt = new Date();
   job.message = "Crawling same-origin pages and assets.";
+  await persistImmediately(job).catch((error) => {
+    logger.warn({ err: error, jobId: job.id }, "Failed to persist mirror job start");
+  });
   try {
     await runJob(job);
   } catch (error) {
@@ -1219,6 +1680,9 @@ async function runJobLifecycle(job: MirrorJobRecord): Promise<void> {
       await job.browser.close().catch(() => undefined);
       job.browser = null;
     }
+    await persistImmediately(job).catch((persistError) => {
+      logger.warn({ err: persistError, jobId: job.id }, "Failed to persist failed mirror job");
+    });
   }
 }
 
@@ -1244,6 +1708,11 @@ async function sweepFinishedJobs(): Promise<void> {
     if (!isFinished || !job.completedAt) continue;
     if (now - new Date(job.completedAt).getTime() < JOB_RETENTION_MS) continue;
     await fs.rm(job.outputDir, { recursive: true, force: true }).catch(() => undefined);
+    await fs.rm(job.archiveFile ?? "", { force: true }).catch(() => undefined);
+    if (useObjectStorage && job.archiveKey && !job.archiveKey.startsWith("local:")) {
+      await getObjectStorage().delete(job.archiveKey, { ignoreNotFound: true }).catch(() => undefined);
+    }
+    await deletePersistedMirrorJob(id).catch(() => undefined);
     jobs.delete(id);
   }
 }
@@ -1304,6 +1773,10 @@ export async function createMirrorJob(input: {
     startedAt: null,
     completedAt: null,
     outputDir,
+    archiveKey: null,
+    archiveBytes: null,
+    archiveFile: null,
+    archiveStorageFailed: false,
     cancelRequested: false,
     browser: null,
     downloadedAssets: new Set<string>(),
@@ -1314,6 +1787,7 @@ export async function createMirrorJob(input: {
     timedOut: false,
     sizeLimitReached: false,
   };
+  await persistImmediately(job);
   jobs.set(id, job);
   scheduleJob(id);
   return job;
@@ -1344,6 +1818,9 @@ export async function cancelMirrorJob(id: string): Promise<MirrorJobRecord | und
       job.completedAt = new Date().toISOString();
     }
     await job.browser?.close().catch(() => undefined);
+    await persistImmediately(job).catch((error) => {
+      logger.warn({ err: error, jobId: job.id }, "Failed to persist mirror cancellation");
+    });
   }
   return job;
 }
@@ -1353,13 +1830,11 @@ export function getPublicMirrorJob(job: MirrorJobRecord) {
 }
 
 export async function streamMirrorZip(job: MirrorJobRecord, response: NodeJS.WritableStream) {
-  const archive = archiver("zip", { zlib: { level: 9 } });
-  archive.on("error", (error: Error) => {
-    throw error;
-  });
-  archive.pipe(response);
-  archive.directory(job.outputDir, false);
-  await archive.finalize();
+  if (!job.archiveKey) {
+    if (!job.outputDir) throw new Error("The mirror archive is not available.");
+    await publishArchive(job);
+  }
+  await streamStoredArchive(job, response);
 }
 
 // Called on process shutdown so in-flight Chromium instances don't linger.

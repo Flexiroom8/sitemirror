@@ -107,6 +107,7 @@ export interface MirrorJob {
   createdAt: string;
   /** @nullable */
   completedAt: string | null;
+  archiveAvailable: boolean;
 }
 
 export interface MirrorJobList {
