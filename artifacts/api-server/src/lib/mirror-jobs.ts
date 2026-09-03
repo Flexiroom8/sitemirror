@@ -14,8 +14,25 @@ export type MirrorStatus =
   | "queued"
   | "running"
   | "completed"
+  | "completed_with_warnings"
   | "failed"
   | "cancelled";
+
+export type MirrorOutcomeStatus = "saved" | "skipped" | "failed";
+
+export type MirrorOutcome = {
+  kind: "page" | "asset";
+  url: string;
+  status: MirrorOutcomeStatus;
+  httpStatus: number | null;
+  contentType: string | null;
+  finalUrl: string | null;
+  archivePath: string | null;
+  reason: string | null;
+  attempts: number;
+  bytes: number;
+  updatedAt: string;
+};
 
 export type MirrorJobRecord = {
   id: string;
@@ -23,7 +40,11 @@ export type MirrorJobRecord = {
   status: MirrorStatus;
   pagesFound: number;
   pagesDownloaded: number;
+  pagesSkipped: number;
+  pagesFailed: number;
   assetsDownloaded: number;
+  assetsSkipped: number;
+  assetsFailed: number;
   bytesDownloaded: number;
   maxPages: number;
   requestDelayMs: number;
@@ -36,6 +57,7 @@ export type MirrorJobRecord = {
   maxTotalBytes: number;
   maxAssetBytes: number;
   currentUrl: string | null;
+  progressPhase: "queued" | "discovering" | "saving" | "downloading_assets" | "rewriting" | "packaging";
   message: string | null;
   createdAt: Date;
   startedAt: Date | null;
@@ -45,6 +67,9 @@ export type MirrorJobRecord = {
   browser: Browser | null;
   downloadedAssets: Set<string>;
   savedPages: Set<string>;
+  outcomes: Map<string, MirrorOutcome>;
+  discoveredUrls: Set<string>;
+  redirects: Map<string, string>;
   timedOut: boolean;
   sizeLimitReached: boolean;
 };
@@ -295,7 +320,11 @@ function publicJob(job: MirrorJobRecord) {
     status: job.status,
     pagesFound: job.pagesFound,
     pagesDownloaded: job.pagesDownloaded,
+    pagesSkipped: job.pagesSkipped,
+    pagesFailed: job.pagesFailed,
     assetsDownloaded: job.assetsDownloaded,
+    assetsSkipped: job.assetsSkipped,
+    assetsFailed: job.assetsFailed,
     bytesDownloaded: job.bytesDownloaded,
     maxPages: job.maxPages,
     requestDelayMs: job.requestDelayMs,
@@ -307,10 +336,115 @@ function publicJob(job: MirrorJobRecord) {
     timeoutMs: job.timeoutMs,
     maxTotalBytes: job.maxTotalBytes,
     currentUrl: job.currentUrl,
+    progressPhase: job.progressPhase,
     message: job.message,
     createdAt: job.createdAt,
     completedAt: job.completedAt,
   };
+}
+
+function outcomeKey(kind: MirrorOutcome["kind"], url: string): string {
+  return `${kind}:${url}`;
+}
+
+function recordOutcome(job: MirrorJobRecord, outcome: Omit<MirrorOutcome, "updatedAt">): void {
+  const key = outcomeKey(outcome.kind, outcome.url);
+  const previous = job.outcomes.get(key);
+  if (previous?.status === "saved" && outcome.status !== "saved") return;
+
+  const next = { ...outcome, updatedAt: new Date().toISOString() };
+  job.outcomes.set(key, next);
+
+  if (previous) {
+    if (previous.kind === "page") {
+      if (previous.status === "skipped") job.pagesSkipped -= 1;
+      if (previous.status === "failed") job.pagesFailed -= 1;
+    } else {
+      if (previous.status === "skipped") job.assetsSkipped -= 1;
+      if (previous.status === "failed") job.assetsFailed -= 1;
+    }
+  }
+
+  if (outcome.kind === "page") {
+    if (outcome.status === "skipped") job.pagesSkipped += 1;
+    if (outcome.status === "failed") job.pagesFailed += 1;
+  } else {
+    if (outcome.status === "skipped") job.assetsSkipped += 1;
+    if (outcome.status === "failed") job.assetsFailed += 1;
+  }
+}
+
+function isHtmlContentType(contentType: string | null | undefined): boolean {
+  return Boolean(contentType && /(?:text\/html|application\/xhtml\+xml)(?:\s*;|$)/i.test(contentType));
+}
+
+async function writeArchiveReports(job: MirrorJobRecord): Promise<void> {
+  const outcomes = [...job.outcomes.values()].sort((a, b) => a.url.localeCompare(b.url));
+  const summary = {
+    discovered: job.pagesFound,
+    pagesSaved: job.pagesDownloaded,
+    pagesSkipped: job.pagesSkipped,
+    pagesFailed: job.pagesFailed,
+    assetsSaved: job.assetsDownloaded,
+    assetsSkipped: job.assetsSkipped,
+    assetsFailed: job.assetsFailed,
+    bytesDownloaded: job.bytesDownloaded,
+    timedOut: job.timedOut,
+    sizeLimitReached: job.sizeLimitReached,
+  };
+  const manifest = {
+    schemaVersion: 1,
+    jobId: job.id,
+    sourceUrl: job.url,
+    configuration: {
+      maxPages: job.maxPages,
+      maxDepth: job.maxDepth,
+      includeAssets: job.includeAssets,
+      pathPrefix: job.pathPrefix,
+      excludePaths: job.excludePaths,
+      respectRobotsTxt: job.respectRobotsTxt,
+      requestDelayMs: job.requestDelayMs,
+      timeoutMs: job.timeoutMs,
+      maxTotalBytes: job.maxTotalBytes,
+    },
+    summary,
+    redirects: Object.fromEntries(job.redirects),
+    outcomes,
+  };
+  const report = {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    status: job.status,
+    summary,
+    warnings: outcomes
+      .filter((outcome) => outcome.status !== "saved")
+      .map(({ url, kind, status, reason, httpStatus, finalUrl }) => ({
+        url,
+        kind,
+        status,
+        reason,
+        httpStatus,
+        finalUrl,
+      })),
+  };
+  const readme = [
+    "Site Mirror archive",
+    "",
+    `Source: ${job.url}`,
+    `Status: ${job.status}`,
+    "",
+    "Open pages/ for saved HTML documents and assets/ for downloaded resources.",
+    "manifest.json contains machine-readable URL and file metadata.",
+    "report.json lists skipped and failed resources with reasons.",
+    "Only archive sites you own or have explicit permission to copy.",
+    "",
+  ].join("\n");
+
+  await Promise.all([
+    fs.writeFile(path.join(job.outputDir, "manifest.json"), JSON.stringify(manifest, null, 2)),
+    fs.writeFile(path.join(job.outputDir, "report.json"), JSON.stringify(report, null, 2)),
+    fs.writeFile(path.join(job.outputDir, "README.txt"), readme),
+  ]);
 }
 
 // A short hash of the query string is appended to the on-disk filename so
@@ -499,30 +633,128 @@ async function rewriteSavedPageFile(
   }
 }
 
-async function downloadAsset(job: MirrorJobRecord, assetUrl: string): Promise<void> {
+async function downloadAsset(job: MirrorJobRecord, assetUrl: string, origin: URL): Promise<void> {
   if (job.downloadedAssets.has(assetUrl)) return;
-  if (job.bytesDownloaded >= job.maxTotalBytes) return;
+  if (job.bytesDownloaded >= job.maxTotalBytes) {
+    recordOutcome(job, {
+      kind: "asset",
+      url: assetUrl,
+      status: "skipped",
+      httpStatus: null,
+      contentType: null,
+      finalUrl: null,
+      archivePath: null,
+      reason: "total byte limit reached",
+      attempts: 0,
+      bytes: 0,
+    });
+    return;
+  }
 
   const target = new URL(assetUrl);
-  if (!(await isHostnameSafe(target.hostname))) return;
+  if (!(await isHostnameSafe(target.hostname))) {
+    recordOutcome(job, {
+      kind: "asset",
+      url: assetUrl,
+      status: "skipped",
+      httpStatus: null,
+      contentType: null,
+      finalUrl: null,
+      archivePath: null,
+      reason: "target is not a public address",
+      attempts: 1,
+      bytes: 0,
+    });
+    return;
+  }
 
   const response = await fetch(assetUrl, {
     signal: AbortSignal.timeout(20_000),
     redirect: "follow",
     headers: { "User-Agent": MIRROR_USER_AGENT },
   });
-  if (!response.ok) return;
+  const finalUrl = new URL(response.url || assetUrl);
+  if (!(await isHostnameSafe(finalUrl.hostname)) || !withinScope(finalUrl, origin, job)) {
+    recordOutcome(job, {
+      kind: "asset",
+      url: assetUrl,
+      status: "skipped",
+      httpStatus: response.status,
+      contentType: response.headers.get("content-type"),
+      finalUrl: finalUrl.href,
+      archivePath: null,
+      reason: "redirected outside the allowed crawl scope",
+      attempts: 1,
+      bytes: 0,
+    });
+    return;
+  }
+
+  const contentType = response.headers.get("content-type");
+  if (!response.ok) {
+    recordOutcome(job, {
+      kind: "asset",
+      url: assetUrl,
+      status: "failed",
+      httpStatus: response.status,
+      contentType,
+      finalUrl: finalUrl.href,
+      archivePath: null,
+      reason: `HTTP ${response.status}`,
+      attempts: 1,
+      bytes: 0,
+    });
+    return;
+  }
 
   const declaredLength = Number(response.headers.get("content-length") ?? "0");
   if (declaredLength > job.maxAssetBytes) {
     logger.debug({ assetUrl, declaredLength, jobId: job.id }, "Skipped asset: exceeds per-asset size limit");
+    recordOutcome(job, {
+      kind: "asset",
+      url: assetUrl,
+      status: "skipped",
+      httpStatus: response.status,
+      contentType,
+      finalUrl: finalUrl.href,
+      archivePath: null,
+      reason: "per-asset size limit reached",
+      attempts: 1,
+      bytes: 0,
+    });
     return;
   }
 
   const body = new Uint8Array(await response.arrayBuffer());
-  if (body.byteLength > job.maxAssetBytes) return;
+  if (body.byteLength > job.maxAssetBytes) {
+    recordOutcome(job, {
+      kind: "asset",
+      url: assetUrl,
+      status: "skipped",
+      httpStatus: response.status,
+      contentType,
+      finalUrl: finalUrl.href,
+      archivePath: null,
+      reason: "per-asset size limit reached",
+      attempts: 1,
+      bytes: body.byteLength,
+    });
+    return;
+  }
   if (job.bytesDownloaded + body.byteLength > job.maxTotalBytes) {
     job.sizeLimitReached = true;
+    recordOutcome(job, {
+      kind: "asset",
+      url: assetUrl,
+      status: "skipped",
+      httpStatus: response.status,
+      contentType,
+      finalUrl: finalUrl.href,
+      archivePath: null,
+      reason: "total byte limit reached",
+      attempts: 1,
+      bytes: body.byteLength,
+    });
     return;
   }
 
@@ -530,6 +762,18 @@ async function downloadAsset(job: MirrorJobRecord, assetUrl: string): Promise<vo
   job.downloadedAssets.add(assetUrl);
   job.assetsDownloaded += 1;
   job.bytesDownloaded += body.byteLength;
+  recordOutcome(job, {
+    kind: "asset",
+    url: assetUrl,
+    status: "saved",
+    httpStatus: response.status,
+    contentType,
+    finalUrl: finalUrl.href,
+    archivePath: filePathForUrl(assetUrl),
+    reason: null,
+    attempts: 1,
+    bytes: body.byteLength,
+  });
 }
 
 async function runWithConcurrency<T>(
@@ -594,6 +838,7 @@ async function configureRequestInterception(page: Page, job: MirrorJobRecord): P
 }
 
 async function runJob(job: MirrorJobRecord): Promise<void> {
+  job.progressPhase = "discovering";
   job.message = "Checking URL safety.";
   const origin = await assertSafePublicUrl(job.url);
   job.message = "Checking robots.txt.";
@@ -605,6 +850,8 @@ async function runJob(job: MirrorJobRecord): Promise<void> {
   const queue: Array<{ url: string; depth: number }> = [{ url: origin.href, depth: 0 }];
   const queuedUrls = new Set([origin.href]);
   const seen = new Set<string>();
+  job.discoveredUrls.add(origin.href);
+  job.pagesFound = job.discoveredUrls.size;
   job.message = "Launching browser.";
   const browser = await puppeteer.launch({
     executablePath,
@@ -651,21 +898,72 @@ async function runJob(job: MirrorJobRecord): Promise<void> {
       if (seen.has(current)) continue;
       const currentUrl = new URL(current);
       if (!withinScope(currentUrl, origin, job) || blockedByRobots(currentUrl, robots)) {
+        recordOutcome(job, {
+          kind: "page",
+          url: current,
+          status: "skipped",
+          httpStatus: null,
+          contentType: null,
+          finalUrl: null,
+          archivePath: null,
+          reason: "outside the allowed scope or blocked by robots.txt",
+          attempts: 0,
+          bytes: 0,
+        });
         continue;
       }
       seen.add(current);
-      job.pagesFound = Math.max(job.pagesFound, seen.size + queue.length);
+      job.progressPhase = "saving";
+      job.pagesFound = job.discoveredUrls.size;
       job.currentUrl = current;
 
       try {
         const response = await page.goto(current, { waitUntil: "domcontentloaded" });
-        if (!response || !response.ok()) continue;
+        if (!response) {
+          throw new Error("The page did not return an HTTP response.");
+        }
 
         // A same-origin URL can still redirect off-origin server-side;
         // re-check scope against where we actually landed.
         const finalUrl = new URL(response.url());
-        if (!sameOrigin(finalUrl, origin)) {
-          logger.debug({ from: current, to: finalUrl.href, jobId: job.id }, "Skipped page: redirected off-origin");
+        const contentType = response.headers()["content-type"] ?? null;
+        if (!sameOrigin(finalUrl, origin) || !withinScope(finalUrl, origin, job)) {
+          logger.debug({ from: current, to: finalUrl.href, jobId: job.id }, "Skipped page: redirected outside scope");
+          recordOutcome(job, {
+            kind: "page",
+            url: current,
+            status: "skipped",
+            httpStatus: response.status(),
+            contentType,
+            finalUrl: finalUrl.href,
+            archivePath: null,
+            reason: "redirected outside the allowed crawl scope",
+            attempts: 1,
+            bytes: 0,
+          });
+          continue;
+        }
+        if (finalUrl.href !== current) job.redirects.set(current, finalUrl.href);
+
+        const renderedContentType = await page
+          .evaluate(
+            () =>
+              (globalThis as unknown as { document?: { contentType?: string } }).document?.contentType ?? null,
+          )
+          .catch(() => null);
+        if (!isHtmlContentType(contentType) && !isHtmlContentType(renderedContentType)) {
+          recordOutcome(job, {
+            kind: "page",
+            url: current,
+            status: "skipped",
+            httpStatus: response.status(),
+            contentType: contentType ?? renderedContentType,
+            finalUrl: finalUrl.href,
+            archivePath: null,
+            reason: "response is not an HTML document",
+            attempts: 1,
+            bytes: 0,
+          });
           continue;
         }
 
@@ -738,17 +1036,45 @@ async function runJob(job: MirrorJobRecord): Promise<void> {
           }
         });
         for (const pageUrl of internalPages) {
-          if (
-            queueEntry.depth < job.maxDepth &&
-            !seen.has(pageUrl) &&
-            !queuedUrls.has(pageUrl) &&
-            queue.length < job.maxPages * 2
-          ) {
+          if (job.discoveredUrls.has(pageUrl)) continue;
+          job.discoveredUrls.add(pageUrl);
+          job.pagesFound = job.discoveredUrls.size;
+
+          if (queueEntry.depth >= job.maxDepth) {
+            recordOutcome(job, {
+              kind: "page",
+              url: pageUrl,
+              status: "skipped",
+              httpStatus: null,
+              contentType: null,
+              finalUrl: null,
+              archivePath: null,
+              reason: "maximum link depth reached",
+              attempts: 0,
+              bytes: 0,
+            });
+            continue;
+          }
+          if (job.discoveredUrls.size > job.maxPages) {
+            recordOutcome(job, {
+              kind: "page",
+              url: pageUrl,
+              status: "skipped",
+              httpStatus: null,
+              contentType: null,
+              finalUrl: null,
+              archivePath: null,
+              reason: "page limit reached",
+              attempts: 0,
+              bytes: 0,
+            });
+            continue;
+          }
+          if (!seen.has(pageUrl) && !queuedUrls.has(pageUrl)) {
             queue.push({ url: pageUrl, depth: queueEntry.depth + 1 });
             queuedUrls.add(pageUrl);
           }
         }
-        job.pagesFound = Math.max(job.pagesFound, seen.size + queue.length);
 
         const assetUrls = job.includeAssets
           ? normalizedAssets.filter((value) => {
@@ -760,26 +1086,65 @@ async function runJob(job: MirrorJobRecord): Promise<void> {
               }
             })
           : [];
+        job.progressPhase = "downloading_assets";
         await runWithConcurrency(assetUrls, ASSET_DOWNLOAD_CONCURRENCY, async (assetUrl) => {
           if (job.cancelRequested || job.bytesDownloaded >= job.maxTotalBytes) return;
           try {
-            await downloadAsset(job, assetUrl);
+            await downloadAsset(job, assetUrl, origin);
           } catch (error) {
+            recordOutcome(job, {
+              kind: "asset",
+              url: assetUrl,
+              status: "failed",
+              httpStatus: null,
+              contentType: null,
+              finalUrl: null,
+              archivePath: null,
+              reason: error instanceof Error ? error.message : "asset request failed",
+              attempts: 1,
+              bytes: 0,
+            });
             logger.debug({ err: error, assetUrl, jobId: job.id }, "Asset download failed; continuing");
           }
         });
 
         const html = await page.content();
-        await writeFileForUrl(job.outputDir, current, Buffer.from(html));
+        const body = Buffer.from(html);
+        await writeFileForUrl(job.outputDir, current, body);
         job.savedPages.add(current);
         job.pagesDownloaded += 1;
+        recordOutcome(job, {
+          kind: "page",
+          url: current,
+          status: "saved",
+          httpStatus: response.status(),
+          contentType: contentType ?? renderedContentType,
+          finalUrl: finalUrl.href,
+          archivePath: filePathForUrl(current),
+          reason: null,
+          attempts: 1,
+          bytes: body.byteLength,
+        });
       } catch (error) {
         // A single unavailable page should not fail the rest of the crawl.
+        recordOutcome(job, {
+          kind: "page",
+          url: current,
+          status: "failed",
+          httpStatus: null,
+          contentType: null,
+          finalUrl: null,
+          archivePath: null,
+          reason: error instanceof Error ? error.message : "page request failed",
+          attempts: 1,
+          bytes: 0,
+        });
         logger.debug({ err: error, url: current, jobId: job.id }, "Failed to crawl page; continuing");
       }
     }
 
     if (job.status !== "cancelled") {
+      job.progressPhase = "rewriting";
       const knownUrls = new Set<string>([...job.savedPages, ...job.downloadedAssets]);
       for (const pageUrl of job.savedPages) {
         if (job.cancelRequested) break;
@@ -788,10 +1153,20 @@ async function runJob(job: MirrorJobRecord): Promise<void> {
         });
       }
 
-      job.status = "completed";
+      job.progressPhase = "packaging";
+      const hasWarnings =
+        job.pagesSkipped > 0 ||
+        job.pagesFailed > 0 ||
+        job.assetsSkipped > 0 ||
+        job.assetsFailed > 0 ||
+        job.timedOut ||
+        job.sizeLimitReached;
+      job.status = hasWarnings ? "completed_with_warnings" : "completed";
       const reasons: string[] = [];
       if (job.timedOut) reasons.push("time limit reached");
       if (job.sizeLimitReached) reasons.push("size limit reached");
+      if (job.pagesFailed || job.assetsFailed) reasons.push(`${job.pagesFailed + job.assetsFailed} request failures`);
+      if (job.pagesSkipped || job.assetsSkipped) reasons.push(`${job.pagesSkipped + job.assetsSkipped} skipped`);
       const suffix = reasons.length ? ` (stopped early: ${reasons.join(", ")})` : "";
       job.message = `Saved ${job.pagesDownloaded} page${job.pagesDownloaded === 1 ? "" : "s"} and ${job.assetsDownloaded} asset${job.assetsDownloaded === 1 ? "" : "s"}.${suffix}`;
     }
@@ -861,7 +1236,11 @@ let cleanupTimer: NodeJS.Timeout | null = null;
 async function sweepFinishedJobs(): Promise<void> {
   const now = Date.now();
   for (const [id, job] of jobs) {
-    const isFinished = job.status === "completed" || job.status === "failed" || job.status === "cancelled";
+    const isFinished =
+      job.status === "completed" ||
+      job.status === "completed_with_warnings" ||
+      job.status === "failed" ||
+      job.status === "cancelled";
     if (!isFinished || !job.completedAt) continue;
     if (now - new Date(job.completedAt).getTime() < JOB_RETENTION_MS) continue;
     await fs.rm(job.outputDir, { recursive: true, force: true }).catch(() => undefined);
@@ -902,7 +1281,11 @@ export async function createMirrorJob(input: {
     status: "queued",
     pagesFound: 0,
     pagesDownloaded: 0,
+    pagesSkipped: 0,
+    pagesFailed: 0,
     assetsDownloaded: 0,
+    assetsSkipped: 0,
+    assetsFailed: 0,
     bytesDownloaded: 0,
     maxPages: input.maxPages ?? 100,
     requestDelayMs: input.requestDelayMs ?? 250,
@@ -915,6 +1298,7 @@ export async function createMirrorJob(input: {
     maxTotalBytes: clamp(input.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES, MIN_TOTAL_BYTES, HARD_MAX_TOTAL_BYTES),
     maxAssetBytes: MAX_ASSET_BYTES,
     currentUrl: null,
+    progressPhase: "queued",
     message: "Waiting to start.",
     createdAt: new Date(),
     startedAt: null,
@@ -924,6 +1308,9 @@ export async function createMirrorJob(input: {
     browser: null,
     downloadedAssets: new Set<string>(),
     savedPages: new Set<string>(),
+    outcomes: new Map<string, MirrorOutcome>(),
+    discoveredUrls: new Set<string>(),
+    redirects: new Map<string, string>(),
     timedOut: false,
     sizeLimitReached: false,
   };

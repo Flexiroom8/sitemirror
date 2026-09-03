@@ -5,11 +5,12 @@ import { useListMirrorJobs, type MirrorJob } from '@workspace/api-client-react';
 import { formatBytes, formatDate } from '@/lib/mirror-format';
 
 function StatusPill({ status }: { status: MirrorJob['status'] }) {
-  const labels = { queued: 'Queued', running: 'Mirroring', completed: 'Complete', failed: 'Failed', cancelled: 'Cancelled' };
+  const labels = { queued: 'Queued', running: 'Mirroring', completed: 'Complete', completed_with_warnings: 'Warnings', failed: 'Failed', cancelled: 'Cancelled' };
   const colors = {
     queued: 'bg-[hsl(var(--accent)/.17)] text-[hsl(var(--accent-foreground))]',
     running: 'bg-[hsl(157_36%_77%/.35)] text-[hsl(158_39%_27%)]',
     completed: 'bg-[hsl(157_36%_77%/.55)] text-[hsl(158_39%_27%)]',
+    completed_with_warnings: 'bg-[hsl(var(--accent)/.25)] text-[hsl(39_65%_28%)]',
     failed: 'bg-[hsl(var(--destructive)/.14)] text-[hsl(var(--destructive))]',
     cancelled: 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]',
   };

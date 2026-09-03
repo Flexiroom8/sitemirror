@@ -233,14 +233,26 @@ components:
           type: string
         status:
           type: string
-          enum: [queued, running, completed, failed, cancelled]
+          enum: [queued, running, completed, completed_with_warnings, failed, cancelled]
         pagesFound:
           type: number
           multipleOf: 1
         pagesDownloaded:
           type: number
           multipleOf: 1
+        pagesSkipped:
+          type: number
+          multipleOf: 1
+        pagesFailed:
+          type: number
+          multipleOf: 1
         assetsDownloaded:
+          type: number
+          multipleOf: 1
+        assetsSkipped:
+          type: number
+          multipleOf: 1
+        assetsFailed:
           type: number
           multipleOf: 1
         bytesDownloaded:
@@ -273,6 +285,9 @@ components:
           multipleOf: 1
         currentUrl:
           type: ["string", "null"]
+        progressPhase:
+          type: string
+          enum: [queued, discovering, saving, downloading_assets, rewriting, packaging]
         message:
           type: ["string", "null"]
         createdAt:
@@ -286,12 +301,17 @@ components:
         - status
         - pagesFound
         - pagesDownloaded
+        - pagesSkipped
+        - pagesFailed
         - assetsDownloaded
+        - assetsSkipped
+        - assetsFailed
         - bytesDownloaded
         - maxPages
         - requestDelayMs
         - respectRobotsTxt
         - currentUrl
+        - progressPhase
         - message
         - createdAt
         - completedAt

@@ -4,7 +4,7 @@ import {
   CreateMirrorJobBody,
   DownloadMirrorJobParams,
   GetMirrorJobParams,
-  ListMirrorJobsQuery,
+  ListMirrorJobsQueryParams,
 } from "@workspace/api-zod";
 import {
   cancelMirrorJob,
@@ -19,7 +19,7 @@ import { createJobLimiter } from "../middlewares/rate-limit";
 const router: IRouter = Router();
 
 router.get("/mirror-jobs", (req, res) => {
-  const parsed = ListMirrorJobsQuery.safeParse(req.query);
+  const parsed = ListMirrorJobsQueryParams.safeParse(req.query);
   const limit = parsed.success ? parsed.data.limit : undefined;
   const jobs = listMirrorJobs(limit).map(getPublicMirrorJob);
   res.json({ jobs });
@@ -80,7 +80,7 @@ router.get("/mirror-jobs/:id/download", async (req, res) => {
     res.status(404).json({ error: "Mirror job not found." });
     return;
   }
-  if (job.status !== "completed") {
+  if (job.status !== "completed" && job.status !== "completed_with_warnings") {
     res.status(409).json({ error: "The mirror is not complete yet." });
     return;
   }

@@ -35,6 +35,7 @@ function statusCopy(status: MirrorJob['status']) {
     queued: { label: 'Queued', title: 'Your mirror is in line.', body: 'The crawl will begin shortly. Scope is locked and ready.' },
     running: { label: 'Mirroring', title: 'The archive is taking shape.', body: 'Site Mirror is following the site, one respectful request at a time.' },
     completed: { label: 'Complete', title: 'Your local copy is ready.', body: 'Every file in scope has been collected and packaged for download.' },
+    completed_with_warnings: { label: 'Complete with warnings', title: 'Your local copy is ready with notes.', body: 'The archive is usable, and the report explains pages or assets that could not be saved.' },
     failed: { label: 'Stopped with an error', title: 'The mirror needs attention.', body: 'The crawl could not finish. Review the message below and try a new job when ready.' },
     cancelled: { label: 'Cancelled', title: 'The crawl was stopped.', body: 'No more requests will be made for this mirror job.' },
   }[status];
@@ -45,6 +46,7 @@ function StatusBadge({ status }: { status: MirrorJob['status'] }) {
     queued: 'text-[hsl(var(--accent-foreground))] bg-[hsl(var(--accent)/.18)]',
     running: 'text-[hsl(158_39%_27%)] bg-[hsl(157_36%_77%/.55)]',
     completed: 'text-[hsl(158_39%_27%)] bg-[hsl(157_36%_77%/.7)]',
+    completed_with_warnings: 'text-[hsl(39_65%_28%)] bg-[hsl(var(--accent)/.35)]',
     failed: 'text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/.12)]',
     cancelled: 'text-[hsl(var(--muted-foreground))] bg-[hsl(var(--muted))]',
   }[status];
@@ -86,7 +88,7 @@ export default function MirrorJobPage() {
 
   const copy = statusCopy(job.status);
   const isActive = job.status === 'running' || job.status === 'queued';
-  const canDownload = job.status === 'completed';
+  const canDownload = job.status === 'completed' || job.status === 'completed_with_warnings';
   const cancel = () => {
     if (!window.confirm('Stop this mirror job? No additional requests will be made.')) return;
     setCancelError('');
@@ -116,7 +118,7 @@ export default function MirrorJobPage() {
         <section className="animate-rise-in overflow-hidden rounded-[1.55rem] bg-[hsl(var(--primary))] p-6 text-[hsl(var(--primary-foreground))] shadow-[var(--shadow-lg)] md:p-9">
           <div className="flex flex-col gap-7 lg:flex-row lg:items-end lg:justify-between"><div className="min-w-0"><div className="mb-4 flex flex-wrap items-center gap-3"><StatusBadge status={job.status} /><span className="font-mono text-[10px] text-[hsl(var(--primary-foreground)/.5)]">started {formatDate(job.createdAt)}</span></div><h1 className="max-w-3xl truncate text-3xl font-extrabold tracking-[-.055em] md:text-5xl">{copy.title}</h1><p className="mt-3 max-w-xl text-sm leading-6 text-[hsl(var(--primary-foreground)/.67)]">{copy.body}</p></div><div className="shrink-0">{canDownload ? <button data-testid="button-download-mirror" onClick={downloadArchive} disabled={download.isFetching} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[hsl(var(--accent))] px-5 text-xs font-extrabold text-[hsl(var(--accent-foreground))] shadow-[0_4px_0_hsl(39_65%_37%)] transition-transform hover:-translate-y-0.5 disabled:opacity-70">{download.isFetching ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}{download.isFetching ? 'Preparing archive...' : 'Download .zip'}</button> : isActive ? <button data-testid="button-cancel-mirror" onClick={cancel} disabled={cancelJob.isPending} className="inline-flex h-11 items-center gap-2 rounded-xl border border-[hsl(var(--primary-foreground)/.25)] bg-[hsl(var(--primary-foreground)/.07)] px-5 text-xs font-bold text-[hsl(var(--primary-foreground))] transition-colors hover:bg-[hsl(var(--primary-foreground)/.14)] disabled:opacity-60"><Square className="h-3 w-3 fill-current" />{cancelJob.isPending ? 'Stopping...' : 'Stop mirror'}</button> : null}</div></div>
           {isActive && <div className="mt-8 border-t border-[hsl(var(--primary-foreground)/.16)] pt-6"><div className="mb-3 flex items-end justify-between gap-4"><div><p className="font-mono text-[10px] uppercase tracking-[.16em] text-[hsl(var(--primary-foreground)/.54)]">Pages collected</p><p className="mt-1 font-mono text-2xl">{job.pagesDownloaded} <span className="text-sm text-[hsl(var(--primary-foreground)/.48)]">/ {job.maxPages}</span></p></div><span data-testid="text-job-progress" className="font-mono text-2xl text-[hsl(var(--accent))]">{progress}%</span></div><div className="h-2 overflow-hidden rounded-full bg-[hsl(var(--primary-foreground)/.12)]"><div className="h-full rounded-full bg-[hsl(var(--accent))] transition-[width] duration-700 ease-out" style={{ width: `${Math.max(progress, job.status === 'queued' ? 4 : progress)}%` }} /></div><div className="mt-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[.12em] text-[hsl(var(--primary-foreground)/.5)]"><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--accent))] signal-dot" />updates every 1.8 seconds</div></div>}
-          {job.status === 'completed' && <div className="mt-8 flex items-center gap-3 border-t border-[hsl(var(--primary-foreground)/.16)] pt-6 text-sm text-[hsl(var(--primary-foreground)/.72)]"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-[hsl(157_36%_77%/.25)] text-[hsl(157_60%_76%)]"><Check className="h-4 w-4" /></span>Archive sealed on {formatDate(job.completedAt)}</div>}
+           {(job.status === 'completed' || job.status === 'completed_with_warnings') && <div className="mt-8 flex items-center gap-3 border-t border-[hsl(var(--primary-foreground)/.16)] pt-6 text-sm text-[hsl(var(--primary-foreground)/.72)]"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-[hsl(157_36%_77%/.25)] text-[hsl(157_60%_76%)]"><Check className="h-4 w-4" /></span>Archive sealed on {formatDate(job.completedAt)}</div>}
           {job.message && <div data-testid="status-job-message" className={`mt-6 flex gap-2 rounded-xl border px-4 py-3 text-xs ${job.status === 'failed' ? 'border-[hsl(var(--destructive)/.35)] bg-[hsl(var(--destructive)/.13)] text-[hsl(5_80%_84%)]' : 'border-[hsl(var(--primary-foreground)/.17)] bg-[hsl(var(--primary-foreground)/.06)] text-[hsl(var(--primary-foreground)/.72)]'}`}><CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />{job.message}</div>}
         </section>
         {cancelError && <div data-testid="status-cancel-error" className="mt-4 rounded-xl border border-[hsl(var(--destructive)/.25)] bg-[hsl(var(--destructive)/.07)] px-4 py-3 text-xs font-semibold text-[hsl(var(--destructive))]">{cancelError}</div>}
