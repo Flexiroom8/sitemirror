@@ -422,6 +422,37 @@ function isHtmlContentType(contentType: string | null | undefined): boolean {
   return Boolean(contentType && /(?:text\/html|application\/xhtml\+xml)(?:\s*;|$)/i.test(contentType));
 }
 
+function extensionForContentType(contentType: string | null | undefined): string | null {
+  const mimeType = contentType?.split(";", 1)[0]?.trim().toLowerCase();
+  if (!mimeType) return null;
+
+  const extensions: Record<string, string> = {
+    "application/pdf": ".pdf",
+    "application/json": ".json",
+    "application/ld+json": ".json",
+    "application/xml": ".xml",
+    "application/xhtml+xml": ".html",
+    "application/javascript": ".js",
+    "application/wasm": ".wasm",
+    "application/zip": ".zip",
+    "image/avif": ".avif",
+    "image/gif": ".gif",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/svg+xml": ".svg",
+    "image/webp": ".webp",
+    "audio/mpeg": ".mp3",
+    "audio/ogg": ".ogg",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+    "text/css": ".css",
+    "text/csv": ".csv",
+    "text/plain": ".txt",
+    "text/xml": ".xml",
+  };
+  return extensions[mimeType] ?? ".bin";
+}
+
 async function writeArchiveReports(job: MirrorJobRecord): Promise<void> {
   const outcomes = [...job.outcomes.values()].sort((a, b) => a.url.localeCompare(b.url));
   const summary = {
@@ -718,22 +749,6 @@ async function savePageWithFetchFallback(
 ): Promise<boolean> {
   const { response, finalUrl } = await fetchWithValidatedRedirects(current, origin, job);
   const contentType = response.headers.get("content-type");
-  if (!isHtmlContentType(contentType)) {
-    recordOutcome(job, {
-      kind: "page",
-      url: current,
-      status: "skipped",
-      httpStatus: response.status,
-      contentType,
-      finalUrl: finalUrl.href,
-      archivePath: null,
-      reason: "response is not an HTML document",
-      attempts: 1,
-      bytes: 0,
-    });
-    return false;
-  }
-
   const body = Buffer.from(await response.arrayBuffer());
   if (body.byteLength > job.maxTotalBytes - job.bytesDownloaded) {
     job.sizeLimitReached = true;
@@ -752,18 +767,20 @@ async function savePageWithFetchFallback(
     return false;
   }
 
-  const markup = body.toString("utf8");
-  const resources = extractMarkupResources(markup);
-  queueDiscoveredPages(
-    job,
-    normalizeResourceValues(resources.links, finalUrl.href),
-    finalUrl.href,
-    depth,
-    queue,
-    origin,
-    robots,
-  );
-  await writeFileForUrl(job.outputDir, current, body);
+  if (isHtmlContentType(contentType)) {
+    const markup = body.toString("utf8");
+    const resources = extractMarkupResources(markup);
+    queueDiscoveredPages(
+      job,
+      normalizeResourceValues(resources.links, finalUrl.href),
+      finalUrl.href,
+      depth,
+      queue,
+      origin,
+      robots,
+    );
+  }
+  await writeFileForUrl(job.outputDir, current, body, contentType);
   job.savedPages.add(current);
   job.pagesDownloaded += 1;
   job.bytesDownloaded += body.byteLength;
@@ -774,7 +791,7 @@ async function savePageWithFetchFallback(
     httpStatus: response.status,
     contentType,
     finalUrl: finalUrl.href,
-    archivePath: filePathForUrl(current),
+    archivePath: filePathForUrl(current, contentType),
     reason: null,
     attempts: 1,
     bytes: body.byteLength,
@@ -785,7 +802,7 @@ async function savePageWithFetchFallback(
 // A short hash of the query string is appended to the on-disk filename so
 // that two URLs which differ only by query (e.g. ?page=1 vs ?page=2) don't
 // collide and silently overwrite each other on disk.
-function filePathForUrl(rawUrl: string): string {
+function filePathForUrl(rawUrl: string, contentType?: string | null): string {
   const parsed = new URL(rawUrl);
   const cleanPath = decodeURIComponent(parsed.pathname).replace(/\\/g, "/");
   const safeSegments = cleanPath
@@ -795,16 +812,20 @@ function filePathForUrl(rawUrl: string): string {
   const querySuffix = parsed.search
     ? `~${createHash("sha1").update(parsed.search).digest("hex").slice(0, 8)}`
     : "";
+  const contentExtension = extensionForContentType(contentType);
 
   const last = safeSegments.at(-1) ?? "";
   if (!path.extname(last)) {
-    safeSegments.push(`index${querySuffix}.html`);
+    safeSegments.push(`index${querySuffix}${contentExtension ?? ".html"}`);
   } else if (querySuffix) {
     const ext = path.extname(last);
     const base = last.slice(0, -ext.length);
     safeSegments[safeSegments.length - 1] = `${base}${querySuffix}${ext}`;
+  } else if (contentExtension && !isHtmlContentType(contentType) && /\.(?:html?|xhtml)$/i.test(last)) {
+    const ext = path.extname(last);
+    safeSegments[safeSegments.length - 1] = `${last.slice(0, -ext.length)}${contentExtension}`;
   }
-  if (safeSegments.length === 0) safeSegments.push(`index${querySuffix}.html`);
+  if (safeSegments.length === 0) safeSegments.push(`index${querySuffix}${contentExtension ?? ".html"}`);
   return path.join(parsed.hostname, ...safeSegments);
 }
 
@@ -907,8 +928,9 @@ async function writeFileForUrl(
   outputDir: string,
   rawUrl: string,
   body: Uint8Array,
+  contentType?: string | null,
 ): Promise<void> {
-  const target = path.join(outputDir, filePathForUrl(rawUrl));
+  const target = path.join(outputDir, filePathForUrl(rawUrl, contentType));
   await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.writeFile(target, body);
 }
@@ -935,6 +957,9 @@ async function rewriteSavedPageFile(
   pageUrl: string,
   knownUrls: Set<string>,
 ): Promise<void> {
+  const outcome = job.outcomes.get(outcomeKey("page", pageUrl));
+  if (!isHtmlContentType(outcome?.contentType)) return;
+
   const pageFile = path.join(job.outputDir, filePathForUrl(pageUrl));
   let html: string;
   try {
@@ -956,7 +981,9 @@ async function rewriteSavedPageFile(
     target.hash = "";
     if (!knownUrls.has(target.href)) return match;
 
-    const targetFile = path.join(job.outputDir, filePathForUrl(target.href));
+    const targetOutcome =
+      job.outcomes.get(outcomeKey("page", target.href)) ?? job.outcomes.get(outcomeKey("asset", target.href));
+    const targetFile = path.join(job.outputDir, filePathForUrl(target.href, targetOutcome?.contentType));
     const relative =
       path.relative(path.dirname(pageFile), targetFile).replace(/\\/g, "/") || path.basename(targetFile);
     const quote = dq !== undefined ? '"' : "'";
@@ -1093,7 +1120,7 @@ async function downloadAsset(job: MirrorJobRecord, assetUrl: string, origin: URL
     return;
   }
 
-  await writeFileForUrl(job.outputDir, assetUrl, body);
+  await writeFileForUrl(job.outputDir, assetUrl, body, contentType);
   job.downloadedAssets.add(assetUrl);
   job.assetsDownloaded += 1;
   job.bytesDownloaded += body.byteLength;
@@ -1104,7 +1131,7 @@ async function downloadAsset(job: MirrorJobRecord, assetUrl: string, origin: URL
     httpStatus: response.status,
     contentType,
     finalUrl: finalUrl.href,
-    archivePath: filePathForUrl(assetUrl),
+    archivePath: filePathForUrl(assetUrl, contentType),
     reason: null,
     attempts: 1,
     bytes: body.byteLength,
@@ -1286,25 +1313,13 @@ async function runJob(job: MirrorJobRecord): Promise<void> {
               (globalThis as unknown as { document?: { contentType?: string } }).document?.contentType ?? null,
           )
           .catch(() => null);
-        if (!isHtmlContentType(contentType) && !isHtmlContentType(renderedContentType)) {
-          recordOutcome(job, {
-            kind: "page",
-            url: current,
-            status: "skipped",
-            httpStatus: response.status(),
-            contentType: contentType ?? renderedContentType,
-            finalUrl: finalUrl.href,
-            archivePath: null,
-            reason: "response is not an HTML document",
-            attempts: 1,
-            bytes: 0,
-          });
-          continue;
-        }
+        const savedContentType = contentType ?? renderedContentType;
+        const isHtmlDocument = isHtmlContentType(contentType) || isHtmlContentType(renderedContentType);
 
         if (effectiveDelayMs > 0) await sleep(effectiveDelayMs);
 
-        const resources = await page.evaluate(() => {
+        const resources = isHtmlDocument
+          ? await page.evaluate(() => {
           const links = new Set<string>();
           const assets = new Set<string>();
           const pageDocument = (
@@ -1347,7 +1362,8 @@ async function runJob(job: MirrorJobRecord): Promise<void> {
             }
           });
           return { links: [...links], assets: [...assets] };
-        });
+            })
+          : { links: [], assets: [] };
         const normalizeResources = (values: string[]) =>
           values
             .map((value) => {
@@ -1443,19 +1459,51 @@ async function runJob(job: MirrorJobRecord): Promise<void> {
           }
         });
 
-        const html = await page.content();
-        const body = Buffer.from(html);
-        await writeFileForUrl(job.outputDir, current, body);
+        let bodyContentType = savedContentType;
+        let bodyFinalUrl = finalUrl;
+        let bodyStatus = response.status();
+        let body: Buffer;
+        if (isHtmlDocument) {
+          body = Buffer.from(await page.content());
+        } else {
+          // Chromium can replace downloads such as PDFs with an internal
+          // viewer document. Fetch the original response through the
+          // validated direct pipeline so the archive contains the source
+          // bytes, not the browser viewer's HTML.
+          const directResponse = await fetchWithValidatedRedirects(current, origin, job);
+          bodyContentType = directResponse.response.headers.get("content-type");
+          bodyFinalUrl = directResponse.finalUrl;
+          bodyStatus = directResponse.response.status;
+          body = Buffer.from(await directResponse.response.arrayBuffer());
+        }
+        if (job.bytesDownloaded + body.byteLength > job.maxTotalBytes) {
+          job.sizeLimitReached = true;
+          recordOutcome(job, {
+            kind: "page",
+            url: current,
+            status: "skipped",
+            httpStatus: bodyStatus,
+            contentType: bodyContentType,
+            finalUrl: bodyFinalUrl.href,
+            archivePath: null,
+            reason: "total byte limit reached",
+            attempts: 1,
+            bytes: body.byteLength,
+          });
+          continue;
+        }
+        await writeFileForUrl(job.outputDir, current, body, bodyContentType);
         job.savedPages.add(current);
         job.pagesDownloaded += 1;
+        job.bytesDownloaded += body.byteLength;
         recordOutcome(job, {
           kind: "page",
           url: current,
           status: "saved",
-          httpStatus: response.status(),
-          contentType: contentType ?? renderedContentType,
-          finalUrl: finalUrl.href,
-          archivePath: filePathForUrl(current),
+          httpStatus: bodyStatus,
+          contentType: bodyContentType,
+          finalUrl: bodyFinalUrl.href,
+          archivePath: filePathForUrl(current, bodyContentType),
           reason: null,
           attempts: 1,
           bytes: body.byteLength,
