@@ -1459,7 +1459,7 @@ async function runJob(job: MirrorJobRecord): Promise<void> {
           }
         });
 
-        let bodyContentType = savedContentType;
+        let bodyContentType: string | null = savedContentType;
         let bodyFinalUrl = finalUrl;
         let bodyStatus = response.status();
         let body: Buffer;
