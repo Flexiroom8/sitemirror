@@ -2,10 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { createReadStream, createWriteStream } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { lookup } from "node:dns/promises";
 import net from "node:net";
+import { pipeline } from "node:stream/promises";
 import { URL } from "node:url";
 import puppeteer, { type Browser, type HTTPRequest, type Page } from "puppeteer";
 import archiver from "archiver";
@@ -18,6 +20,11 @@ import {
   type MirrorJobConfigSnapshot,
   type MirrorJobProgressSnapshot,
 } from "./mirror-repository";
+
+const require = createRequire(import.meta.url);
+const unzipper = require("unzipper") as {
+  Parse: (options?: { forceStream?: boolean }) => NodeJS.ReadWriteStream;
+};
 
 export type MirrorStatus =
   | "queued"
@@ -101,6 +108,7 @@ const jobs = new Map<string, MirrorJobRecord>();
 const tempRoot = path.join(os.tmpdir(), "site-mirror-jobs");
 let browserReadyPromise: Promise<string> | undefined;
 const persistenceTimers = new Map<string, NodeJS.Timeout>();
+const previewExtractionPromises = new Map<string, Promise<string>>();
 const useObjectStorage = process.env.NODE_ENV === "production";
 let objectStorage: ObjectStorageClient | null = null;
 
@@ -422,6 +430,20 @@ function isHtmlContentType(contentType: string | null | undefined): boolean {
   return Boolean(contentType && /(?:text\/html|application\/xhtml\+xml)(?:\s*;|$)/i.test(contentType));
 }
 
+function looksLikeHtmlDocument(body: Uint8Array): boolean {
+  const sample = Buffer.from(body.subarray(0, 8192))
+    .toString("utf8")
+    .replace(/^\uFEFF/, "")
+    .trimStart()
+    .toLowerCase();
+  return sample.startsWith("<!doctype html") || /^<html(?:[\s>])/i.test(sample);
+}
+
+function isHtmlResponse(contentType: string | null | undefined, body: Uint8Array): boolean {
+  if (isHtmlContentType(contentType)) return true;
+  return (!contentType || /application\/octet-stream/i.test(contentType)) && looksLikeHtmlDocument(body);
+}
+
 function extensionForContentType(contentType: string | null | undefined): string | null {
   const mimeType = contentType?.split(";", 1)[0]?.trim().toLowerCase();
   if (!mimeType) return null;
@@ -445,6 +467,7 @@ function extensionForContentType(contentType: string | null | undefined): string
     "audio/ogg": ".ogg",
     "video/mp4": ".mp4",
     "video/webm": ".webm",
+    "text/html": ".html",
     "text/css": ".css",
     "text/csv": ".csv",
     "text/plain": ".txt",
@@ -585,6 +608,125 @@ async function streamStoredArchive(
     response.once("finish", resolve);
     source.pipe(response);
   });
+}
+
+type PreviewZipEntry = NodeJS.ReadableStream & {
+  path: string;
+  type: string;
+  autodrain: () => void;
+};
+
+function previewPathIsInsideRoot(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function safePreviewEntryPath(root: string, entryPath: string): string {
+  const normalized = entryPath.replace(/\\/g, "/");
+  if (!normalized || normalized.startsWith("/") || normalized.includes("\0")) {
+    throw new Error("The mirror archive contains an invalid preview path.");
+  }
+  const segments = normalized.split("/");
+  if (segments.some((segment) => segment === "..")) {
+    throw new Error("The mirror archive contains an unsafe preview path.");
+  }
+  const candidate = path.resolve(root, ...segments.filter(Boolean));
+  if (!previewPathIsInsideRoot(root, candidate)) {
+    throw new Error("The mirror archive contains an unsafe preview path.");
+  }
+  return candidate;
+}
+
+async function extractMirrorPreviewArchive(job: MirrorJobRecord): Promise<string> {
+  const root = path.resolve(job.outputDir);
+  const manifestPath = path.join(root, "manifest.json");
+  try {
+    await fs.access(manifestPath);
+    return root;
+  } catch {
+    // A completed production job keeps the ZIP in object storage rather than
+    // its temporary working directory. Extract it only when preview is first
+    // requested, then reuse the job-scoped files for subsequent requests.
+  }
+
+  await fs.rm(root, { recursive: true, force: true });
+  await fs.mkdir(root, { recursive: true });
+
+  const archiveSource =
+    job.archiveFile
+      ? createReadStream(job.archiveFile)
+      : useObjectStorage && job.archiveKey && !job.archiveKey.startsWith("local:")
+        ? getObjectStorage().downloadAsStream(job.archiveKey)
+        : null;
+  if (!archiveSource) throw new Error("The mirror archive is not available.");
+
+  const parser = unzipper.Parse({ forceStream: true }) as NodeJS.ReadWriteStream & AsyncIterable<PreviewZipEntry>;
+  archiveSource.pipe(parser);
+  try {
+    for await (const entry of parser) {
+      const target = safePreviewEntryPath(root, entry.path);
+      if (entry.type === "Directory" || entry.path.endsWith("/") || entry.path.endsWith("\\")) {
+        entry.autodrain();
+        await fs.mkdir(target, { recursive: true });
+        continue;
+      }
+      if (entry.type !== "File") {
+        entry.autodrain();
+        throw new Error("The mirror archive contains an unsupported preview entry.");
+      }
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await pipeline(entry, createWriteStream(target));
+    }
+  } catch (error) {
+    await fs.rm(root, { recursive: true, force: true }).catch(() => undefined);
+    throw error;
+  }
+  return root;
+}
+
+async function ensureMirrorPreviewFiles(job: MirrorJobRecord): Promise<string> {
+  const existing = previewExtractionPromises.get(job.id);
+  if (existing) return existing;
+  const extraction = extractMirrorPreviewArchive(job).finally(() => {
+    previewExtractionPromises.delete(job.id);
+  });
+  previewExtractionPromises.set(job.id, extraction);
+  return extraction;
+}
+
+export function getMirrorPreviewStartPath(job: MirrorJobRecord): string | null {
+  const startingOutcome = job.outcomes.get(outcomeKey("page", job.url));
+  if (startingOutcome?.status === "saved" && startingOutcome.archivePath) {
+    return startingOutcome.archivePath.replace(/\\/g, "/");
+  }
+  const firstSavedPage = [...job.outcomes.values()].find(
+    (outcome) => outcome.kind === "page" && outcome.status === "saved" && outcome.archivePath,
+  );
+  return firstSavedPage?.archivePath?.replace(/\\/g, "/") ?? null;
+}
+
+export async function getMirrorPreviewFile(job: MirrorJobRecord, requestedPath: string): Promise<string> {
+  const root = await ensureMirrorPreviewFiles(job);
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(requestedPath);
+  } catch {
+    throw new Error("The preview path is invalid.");
+  }
+  const file = safePreviewEntryPath(root, decodedPath);
+  try {
+    const stats = await fs.stat(file);
+    if (stats.isDirectory()) {
+      const indexFile = path.join(file, "index.html");
+      if (!previewPathIsInsideRoot(root, indexFile)) throw new Error("The preview path is invalid.");
+      return indexFile;
+    }
+    if (!stats.isFile()) throw new Error("The preview file is not available.");
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("The preview")) throw error;
+    throw new Error("The preview file is not available.");
+  }
+  return file;
 }
 
 async function fetchWithValidatedRedirects(
@@ -750,6 +892,9 @@ async function savePageWithFetchFallback(
   const { response, finalUrl } = await fetchWithValidatedRedirects(current, origin, job);
   const contentType = response.headers.get("content-type");
   const body = Buffer.from(await response.arrayBuffer());
+  const isHtmlDocument = isHtmlResponse(contentType, body);
+  const savedContentType =
+    isHtmlDocument && !isHtmlContentType(contentType) ? "text/html; charset=utf-8" : contentType;
   if (body.byteLength > job.maxTotalBytes - job.bytesDownloaded) {
     job.sizeLimitReached = true;
     recordOutcome(job, {
@@ -757,7 +902,7 @@ async function savePageWithFetchFallback(
       url: current,
       status: "skipped",
       httpStatus: response.status,
-      contentType,
+      contentType: savedContentType,
       finalUrl: finalUrl.href,
       archivePath: null,
       reason: "total byte limit reached",
@@ -767,7 +912,7 @@ async function savePageWithFetchFallback(
     return false;
   }
 
-  if (isHtmlContentType(contentType)) {
+  if (isHtmlDocument) {
     const markup = body.toString("utf8");
     const resources = extractMarkupResources(markup);
     queueDiscoveredPages(
@@ -780,7 +925,7 @@ async function savePageWithFetchFallback(
       robots,
     );
   }
-  await writeFileForUrl(job.outputDir, current, body, contentType);
+  await writeFileForUrl(job.outputDir, current, body, savedContentType);
   job.savedPages.add(current);
   job.pagesDownloaded += 1;
   job.bytesDownloaded += body.byteLength;
@@ -789,9 +934,9 @@ async function savePageWithFetchFallback(
     url: current,
     status: "saved",
     httpStatus: response.status,
-    contentType,
+    contentType: savedContentType,
     finalUrl: finalUrl.href,
-    archivePath: filePathForUrl(current, contentType),
+    archivePath: filePathForUrl(current, savedContentType),
     reason: null,
     attempts: 1,
     bytes: body.byteLength,
@@ -1313,8 +1458,12 @@ async function runJob(job: MirrorJobRecord): Promise<void> {
               (globalThis as unknown as { document?: { contentType?: string } }).document?.contentType ?? null,
           )
           .catch(() => null);
-        const savedContentType = contentType ?? renderedContentType;
         const isHtmlDocument = isHtmlContentType(contentType) || isHtmlContentType(renderedContentType);
+        const savedContentType = isHtmlDocument
+          ? isHtmlContentType(contentType)
+            ? contentType
+            : "text/html; charset=utf-8"
+          : contentType ?? renderedContentType;
 
         if (effectiveDelayMs > 0) await sleep(effectiveDelayMs);
 
@@ -1475,6 +1624,21 @@ async function runJob(job: MirrorJobRecord): Promise<void> {
           bodyFinalUrl = directResponse.finalUrl;
           bodyStatus = directResponse.response.status;
           body = Buffer.from(await directResponse.response.arrayBuffer());
+          if (isHtmlResponse(bodyContentType, body)) {
+            bodyContentType =
+              isHtmlContentType(bodyContentType) ? bodyContentType : "text/html; charset=utf-8";
+            const directMarkup = body.toString("utf8");
+            const directResources = extractMarkupResources(directMarkup);
+            queueDiscoveredPages(
+              job,
+              normalizeResourceValues(directResources.links, bodyFinalUrl.href),
+              bodyFinalUrl.href,
+              queueEntry.depth,
+              queue,
+              origin,
+              robots,
+            );
+          }
         }
         if (job.bytesDownloaded + body.byteLength > job.maxTotalBytes) {
           job.sizeLimitReached = true;

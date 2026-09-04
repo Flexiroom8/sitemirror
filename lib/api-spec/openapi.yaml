@@ -140,6 +140,66 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /mirror-jobs/{id}/preview:
+    get:
+      operationId: previewMirrorJob
+      tags: [mirror]
+      summary: Open the starting page of a completed mirror
+      description: Redirects to the archived path for the mirrored starting page.
+      parameters:
+        - $ref: "#/components/parameters/MirrorJobId"
+      responses:
+        "302":
+          description: Redirect to the archived starting page
+          headers:
+            Location:
+              schema:
+                type: string
+        "404":
+          description: Mirror job or starting page not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Mirror is not complete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /mirror-jobs/{id}/preview/{previewPath}:
+    get:
+      operationId: serveMirrorPreviewFile
+      tags: [mirror]
+      summary: Serve a file from a completed mirror preview
+      parameters:
+        - $ref: "#/components/parameters/MirrorJobId"
+        - name: previewPath
+          in: path
+          required: true
+          description: Safe slash-separated path inside the mirror archive
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Mirrored file
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Mirror job or preview file not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Mirror is not complete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   parameters:
     MirrorJobId:

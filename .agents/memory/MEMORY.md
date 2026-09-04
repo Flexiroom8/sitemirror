@@ -1,1 +1,2 @@
 - [Puppeteer runtime](puppeteer-runtime.md) — Puppeteer Chrome needs both a downloaded browser and Linux shared libraries in this environment.
+- [Artifact preview runtime](preview-runtime.md) — The web and API artifacts run on separate dev ports, and mirrored HTML may need MIME sniffing when upstream metadata is generic.

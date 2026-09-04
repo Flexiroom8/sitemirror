@@ -6,6 +6,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import MirrorHome from '@/pages/mirror-home';
 import MirrorHistory from '@/pages/mirror-history';
 import MirrorJobPage from '@/pages/mirror-job';
+import MirrorPreviewPage from '@/pages/mirror-preview';
 import NotFound from '@/pages/not-found';
 import {
   Route,
@@ -24,6 +25,7 @@ function Router() {
       <Switch>
         <Route path="/" component={MirrorHome} />
         <Route path="/history" component={MirrorHistory} />
+        <Route path="/jobs/:id/preview" component={MirrorPreviewPage} />
         <Route path="/jobs/:id" component={MirrorJobPage} />
         <Route component={NotFound} />
       </Switch>

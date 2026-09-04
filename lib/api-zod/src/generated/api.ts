@@ -350,3 +350,31 @@ export const DownloadMirrorJobParams = zod.object({
 export const DownloadMirrorJobResponse = zod.unknown()
 
 
+/**
+ * Redirects to the archived path for the mirrored starting page.
+ * @summary Open the starting page of a completed mirror
+ */
+
+
+
+export const PreviewMirrorJobParams = zod.object({
+  "id": zod.coerce.string().min(1)
+})
+
+export const PreviewMirrorJobResponse = zod.void()
+
+
+/**
+ * @summary Serve a file from a completed mirror preview
+ */
+
+
+
+export const ServeMirrorPreviewFileParams = zod.object({
+  "id": zod.coerce.string().min(1),
+  "previewPath": zod.coerce.string().describe('Safe slash-separated path inside the mirror archive')
+})
+
+export const ServeMirrorPreviewFileResponse = zod.unknown()
+
+

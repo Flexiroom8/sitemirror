@@ -527,3 +527,163 @@ export function useDownloadMirrorJob<TData = Awaited<ReturnType<typeof downloadM
 
 
 
+export const getPreviewMirrorJobUrl = (id: string,) => {
+
+
+
+
+  return `/api/mirror-jobs/${id}/preview`
+}
+
+/**
+ * Redirects to the archived path for the mirrored starting page.
+ * @summary Open the starting page of a completed mirror
+ */
+export const previewMirrorJob = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<unknown> => {
+
+  return customFetch<unknown>(getPreviewMirrorJobUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getPreviewMirrorJobQueryKey = (id: string,) => {
+    return [
+    `/api/mirror-jobs/${id}/preview`
+    ] as const;
+    }
+
+
+export const getPreviewMirrorJobQueryOptions = <TData = Awaited<ReturnType<typeof previewMirrorJob>>, TError = ErrorType<void | ErrorResponse>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof previewMirrorJob>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getPreviewMirrorJobQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof previewMirrorJob>>> = ({ signal }) => previewMirrorJob(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof previewMirrorJob>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type PreviewMirrorJobQueryResult = NonNullable<Awaited<ReturnType<typeof previewMirrorJob>>>
+export type PreviewMirrorJobQueryError = ErrorType<void | ErrorResponse>
+
+
+/**
+ * @summary Open the starting page of a completed mirror
+ */
+
+export function usePreviewMirrorJob<TData = Awaited<ReturnType<typeof previewMirrorJob>>, TError = ErrorType<void | ErrorResponse>>(
+ id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof previewMirrorJob>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getPreviewMirrorJobQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getServeMirrorPreviewFileUrl = (id: string,
+    previewPath: string,) => {
+
+
+
+
+  return `/api/mirror-jobs/${id}/preview/${previewPath}`
+}
+
+/**
+ * @summary Serve a file from a completed mirror preview
+ */
+export const serveMirrorPreviewFile = async (id: string,
+    previewPath: string, options?: Parameters<typeof customFetch>[1]): Promise<Blob> => {
+
+  return customFetch<Blob>(getServeMirrorPreviewFileUrl(id,previewPath),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getServeMirrorPreviewFileQueryKey = (id: string,
+    previewPath: string,) => {
+    return [
+    `/api/mirror-jobs/${id}/preview/${previewPath}`
+    ] as const;
+    }
+
+
+export const getServeMirrorPreviewFileQueryOptions = <TData = Awaited<ReturnType<typeof serveMirrorPreviewFile>>, TError = ErrorType<ErrorResponse>>(id: string,
+    previewPath: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof serveMirrorPreviewFile>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getServeMirrorPreviewFileQueryKey(id,previewPath);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof serveMirrorPreviewFile>>> = ({ signal }) => serveMirrorPreviewFile(id,previewPath, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined && previewPath !== null && previewPath !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof serveMirrorPreviewFile>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ServeMirrorPreviewFileQueryResult = NonNullable<Awaited<ReturnType<typeof serveMirrorPreviewFile>>>
+export type ServeMirrorPreviewFileQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Serve a file from a completed mirror preview
+ */
+
+export function useServeMirrorPreviewFile<TData = Awaited<ReturnType<typeof serveMirrorPreviewFile>>, TError = ErrorType<ErrorResponse>>(
+ id: string,
+    previewPath: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof serveMirrorPreviewFile>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getServeMirrorPreviewFileQueryOptions(id,previewPath,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
