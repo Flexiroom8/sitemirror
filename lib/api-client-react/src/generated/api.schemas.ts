@@ -78,6 +78,50 @@ export const MirrorJobProgressPhase = {
   packaging: 'packaging',
 } as const;
 
+export interface MirrorQueueSummary {
+  saved: number;
+  skipped: number;
+  failed: number;
+  discovered: number;
+  pending: number;
+}
+
+export type MirrorOutcomeKind = typeof MirrorOutcomeKind[keyof typeof MirrorOutcomeKind];
+
+
+export const MirrorOutcomeKind = {
+  page: 'page',
+  asset: 'asset',
+} as const;
+
+export type MirrorOutcomeStatus = typeof MirrorOutcomeStatus[keyof typeof MirrorOutcomeStatus];
+
+
+export const MirrorOutcomeStatus = {
+  saved: 'saved',
+  skipped: 'skipped',
+  failed: 'failed',
+} as const;
+
+export interface MirrorOutcome {
+  kind: MirrorOutcomeKind;
+  url: string;
+  status: MirrorOutcomeStatus;
+  /** @nullable */
+  httpStatus: number | null;
+  /** @nullable */
+  contentType: string | null;
+  /** @nullable */
+  finalUrl: string | null;
+  /** @nullable */
+  archivePath: string | null;
+  /** @nullable */
+  reason: string | null;
+  attempts: number;
+  bytes: number;
+  updatedAt: string;
+}
+
 export interface MirrorJob {
   id: string;
   url: string;
@@ -108,10 +152,82 @@ export interface MirrorJob {
   /** @nullable */
   completedAt: string | null;
   archiveAvailable: boolean;
+  queueSummary: MirrorQueueSummary;
+  outcomes: MirrorOutcome[];
 }
 
 export interface MirrorJobList {
   jobs: MirrorJob[];
+}
+
+export type MirrorArchiveFileKind = typeof MirrorArchiveFileKind[keyof typeof MirrorArchiveFileKind];
+
+
+export const MirrorArchiveFileKind = {
+  page: 'page',
+  asset: 'asset',
+} as const;
+
+export type MirrorArchiveFileStatus = typeof MirrorArchiveFileStatus[keyof typeof MirrorArchiveFileStatus];
+
+
+export const MirrorArchiveFileStatus = {
+  saved: 'saved',
+  skipped: 'skipped',
+  failed: 'failed',
+} as const;
+
+export interface MirrorArchiveFile {
+  path: string;
+  kind: MirrorArchiveFileKind;
+  url: string;
+  status: MirrorArchiveFileStatus;
+  /** @nullable */
+  contentType: string | null;
+  bytes: number;
+  /** @nullable */
+  reason: string | null;
+  /** @nullable */
+  finalUrl: string | null;
+}
+
+export type MirrorArchiveManifestConfiguration = { [key: string]: unknown };
+
+export type MirrorArchiveManifestSummary = { [key: string]: unknown };
+
+export type MirrorArchiveManifestRedirects = {[key: string]: string};
+
+export interface MirrorArchiveManifest {
+  schemaVersion: number;
+  jobId: string;
+  sourceUrl: string;
+  configuration: MirrorArchiveManifestConfiguration;
+  summary: MirrorArchiveManifestSummary;
+  redirects: MirrorArchiveManifestRedirects;
+  outcomes: MirrorOutcome[];
+}
+
+export interface MirrorIntegrityWarning {
+  kind: string;
+  url: string;
+  /** @nullable */
+  path: string | null;
+  status: string;
+  /** @nullable */
+  reason: string | null;
+  /** @nullable */
+  httpStatus: number | null;
+}
+
+export interface MirrorIntegrityReport {
+  valid: boolean;
+  schemaVersion: number;
+  fileCount: number;
+  savedCount: number;
+  warningCount: number;
+  brokenPages: number;
+  brokenAssets: number;
+  warnings: MirrorIntegrityWarning[];
 }
 
 export interface ErrorResponse {
@@ -124,5 +240,33 @@ export type ListMirrorJobsParams = {
  * @maximum 100
  */
 limit?: number;
+};
+
+export type ListMirrorArchiveFilesParams = {
+search?: string;
+kind?: ListMirrorArchiveFilesKind;
+status?: ListMirrorArchiveFilesStatus;
+};
+
+export type ListMirrorArchiveFilesKind = typeof ListMirrorArchiveFilesKind[keyof typeof ListMirrorArchiveFilesKind];
+
+
+export const ListMirrorArchiveFilesKind = {
+  page: 'page',
+  asset: 'asset',
+} as const;
+
+export type ListMirrorArchiveFilesStatus = typeof ListMirrorArchiveFilesStatus[keyof typeof ListMirrorArchiveFilesStatus];
+
+
+export const ListMirrorArchiveFilesStatus = {
+  saved: 'saved',
+  skipped: 'skipped',
+  failed: 'failed',
+} as const;
+
+export type ListMirrorArchiveFiles200 = {
+  total: number;
+  files: MirrorArchiveFile[];
 };
 

@@ -9,11 +9,16 @@ import {
 import {
   cancelMirrorJob,
   createMirrorJob,
+  findActiveMirrorJob,
+  getMirrorArchiveFiles,
+  getMirrorArchiveIntegrity,
+  getMirrorArchiveManifest,
   getMirrorJob,
   getMirrorPreviewFile,
   getMirrorPreviewStartPath,
   getPublicMirrorJob,
   listMirrorJobs,
+  retryMirrorJob,
   streamMirrorZip,
 } from "../lib/mirror-jobs";
 import { createJobLimiter } from "../middlewares/rate-limit";
@@ -76,6 +81,14 @@ router.post("/mirror-jobs", createJobLimiter, async (req, res) => {
   }
 
   try {
+    const duplicate = findActiveMirrorJob(parsed.data.url);
+    if (duplicate) {
+      res.status(409).json({
+        error: "A mirror for this starting URL is already running.",
+        existingJobId: duplicate.id,
+      });
+      return;
+    }
     const job = await createMirrorJob(parsed.data);
     res.status(202).json(getPublicMirrorJob(job));
   } catch (error) {
@@ -110,6 +123,84 @@ router.post("/mirror-jobs/:id/cancel", async (req, res) => {
     return;
   }
   res.json(getPublicMirrorJob(job));
+});
+
+router.post("/mirror-jobs/:id/retry", async (req, res) => {
+  const parsed = GetMirrorJobParams.safeParse(req.params);
+  if (!parsed.success) {
+    res.status(404).json({ error: "Mirror job not found." });
+    return;
+  }
+  const job = await retryMirrorJob(parsed.data.id);
+  if (!job) {
+    res.status(404).json({ error: "Mirror job not found." });
+    return;
+  }
+  if (job.id === parsed.data.id && (job.status === "queued" || job.status === "running")) {
+    res.status(409).json({ error: "This mirror is already running.", existingJobId: job.id });
+    return;
+  }
+  res.status(202).json(getPublicMirrorJob(job));
+});
+
+router.get("/mirror-jobs/:id/archive/manifest", async (req, res) => {
+  const job = getMirrorJob(req.params.id);
+  if (!job) {
+    res.status(404).json({ error: "Mirror job not found." });
+    return;
+  }
+  if (!job.archiveKey) {
+    res.status(409).json({ error: "The mirror archive is not ready." });
+    return;
+  }
+  try {
+    res.json(await getMirrorArchiveManifest(job));
+  } catch (error) {
+    req.log.error({ err: error, jobId: job.id }, "Failed to read mirror manifest");
+    res.status(500).json({ error: "The mirror manifest could not be read." });
+  }
+});
+
+router.get("/mirror-jobs/:id/archive/files", async (req, res) => {
+  const job = getMirrorJob(req.params.id);
+  if (!job) {
+    res.status(404).json({ error: "Mirror job not found." });
+    return;
+  }
+  if (!job.archiveKey) {
+    res.status(409).json({ error: "The mirror archive is not ready." });
+    return;
+  }
+  try {
+    const manifest = await getMirrorArchiveManifest(job);
+    const files = getMirrorArchiveFiles(manifest, {
+      search: typeof req.query.search === "string" ? req.query.search : undefined,
+      kind: typeof req.query.kind === "string" ? req.query.kind : undefined,
+      status: typeof req.query.status === "string" ? req.query.status : undefined,
+    });
+    res.json({ files, total: files.length });
+  } catch (error) {
+    req.log.error({ err: error, jobId: job.id }, "Failed to list mirror files");
+    res.status(500).json({ error: "The mirror file list could not be read." });
+  }
+});
+
+router.get("/mirror-jobs/:id/archive/integrity", async (req, res) => {
+  const job = getMirrorJob(req.params.id);
+  if (!job) {
+    res.status(404).json({ error: "Mirror job not found." });
+    return;
+  }
+  if (!job.archiveKey) {
+    res.status(409).json({ error: "The mirror archive is not ready." });
+    return;
+  }
+  try {
+    res.json(await getMirrorArchiveIntegrity(job));
+  } catch (error) {
+    req.log.error({ err: error, jobId: job.id }, "Failed to inspect mirror integrity");
+    res.status(500).json({ error: "The mirror integrity report could not be read." });
+  }
 });
 
 router.get("/mirror-jobs/:id/preview", serveMirrorPreview);

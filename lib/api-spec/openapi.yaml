@@ -113,6 +113,132 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /mirror-jobs/{id}/retry:
+    post:
+      operationId: retryMirrorJob
+      tags: [mirror]
+      summary: Start another run with the same mirror settings
+      parameters:
+        - $ref: "#/components/parameters/MirrorJobId"
+      responses:
+        "202":
+          description: Retry mirror job accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MirrorJob"
+        "404":
+          description: Mirror job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Mirror is already running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /mirror-jobs/{id}/archive/manifest:
+    get:
+      operationId: getMirrorArchiveManifest
+      tags: [mirror]
+      summary: Read a sealed mirror archive manifest
+      parameters:
+        - $ref: "#/components/parameters/MirrorJobId"
+      responses:
+        "200":
+          description: Archive manifest
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MirrorArchiveManifest"
+        "404":
+          description: Mirror job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Archive is not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /mirror-jobs/{id}/archive/files:
+    get:
+      operationId: listMirrorArchiveFiles
+      tags: [mirror]
+      summary: Search files in a sealed mirror archive
+      parameters:
+        - $ref: "#/components/parameters/MirrorJobId"
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [page, asset]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [saved, skipped, failed]
+      responses:
+        "200":
+          description: Matching archive files
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: number
+                  files:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MirrorArchiveFile"
+                required: [total, files]
+        "404":
+          description: Mirror job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Archive is not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /mirror-jobs/{id}/archive/integrity:
+    get:
+      operationId: getMirrorArchiveIntegrity
+      tags: [mirror]
+      summary: Inspect archive health and failed resources
+      parameters:
+        - $ref: "#/components/parameters/MirrorJobId"
+      responses:
+        "200":
+          description: Archive integrity report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MirrorIntegrityReport"
+        "404":
+          description: Mirror job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Archive is not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /mirror-jobs/{id}/download:
     get:
       operationId: downloadMirrorJob
@@ -357,6 +483,12 @@ components:
           type: ["string", "null"]
         archiveAvailable:
           type: boolean
+        queueSummary:
+          $ref: "#/components/schemas/MirrorQueueSummary"
+        outcomes:
+          type: array
+          items:
+            $ref: "#/components/schemas/MirrorOutcome"
       required:
         - id
         - url
@@ -378,6 +510,135 @@ components:
         - createdAt
         - completedAt
         - archiveAvailable
+        - queueSummary
+        - outcomes
+    MirrorQueueSummary:
+      type: object
+      properties:
+        saved:
+          type: number
+        skipped:
+          type: number
+        failed:
+          type: number
+        discovered:
+          type: number
+        pending:
+          type: number
+      required: [saved, skipped, failed, discovered, pending]
+    MirrorOutcome:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [page, asset]
+        url:
+          type: string
+        status:
+          type: string
+          enum: [saved, skipped, failed]
+        httpStatus:
+          type: ["number", "null"]
+        contentType:
+          type: ["string", "null"]
+        finalUrl:
+          type: ["string", "null"]
+        archivePath:
+          type: ["string", "null"]
+        reason:
+          type: ["string", "null"]
+        attempts:
+          type: number
+        bytes:
+          type: number
+        updatedAt:
+          type: string
+          format: date-time
+      required: [kind, url, status, httpStatus, contentType, finalUrl, archivePath, reason, attempts, bytes, updatedAt]
+    MirrorArchiveFile:
+      type: object
+      properties:
+        path:
+          type: string
+        kind:
+          type: string
+          enum: [page, asset]
+        url:
+          type: string
+        status:
+          type: string
+          enum: [saved, skipped, failed]
+        contentType:
+          type: ["string", "null"]
+        bytes:
+          type: number
+        reason:
+          type: ["string", "null"]
+        finalUrl:
+          type: ["string", "null"]
+      required: [path, kind, url, status, contentType, bytes, reason, finalUrl]
+    MirrorArchiveManifest:
+      type: object
+      properties:
+        schemaVersion:
+          type: number
+        jobId:
+          type: string
+        sourceUrl:
+          type: string
+        configuration:
+          type: object
+          additionalProperties: true
+        summary:
+          type: object
+          additionalProperties: true
+        redirects:
+          type: object
+          additionalProperties:
+            type: string
+        outcomes:
+          type: array
+          items:
+            $ref: "#/components/schemas/MirrorOutcome"
+      required: [schemaVersion, jobId, sourceUrl, configuration, summary, redirects, outcomes]
+    MirrorIntegrityWarning:
+      type: object
+      properties:
+        kind:
+          type: string
+        url:
+          type: string
+        path:
+          type: ["string", "null"]
+        status:
+          type: string
+        reason:
+          type: ["string", "null"]
+        httpStatus:
+          type: ["number", "null"]
+      required: [kind, url, path, status, reason, httpStatus]
+    MirrorIntegrityReport:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        schemaVersion:
+          type: number
+        fileCount:
+          type: number
+        savedCount:
+          type: number
+        warningCount:
+          type: number
+        brokenPages:
+          type: number
+        brokenAssets:
+          type: number
+        warnings:
+          type: array
+          items:
+            $ref: "#/components/schemas/MirrorIntegrityWarning"
+      required: [valid, schemaVersion, fileCount, savedCount, warningCount, brokenPages, brokenAssets, warnings]
     ErrorResponse:
       type: object
       properties:

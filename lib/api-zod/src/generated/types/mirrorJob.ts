@@ -7,6 +7,8 @@
  */
 import type { MirrorJobProgressPhase } from './mirrorJobProgressPhase';
 import type { MirrorJobStatus } from './mirrorJobStatus';
+import type { MirrorOutcome } from './mirrorOutcome';
+import type { MirrorQueueSummary } from './mirrorQueueSummary';
 
 export interface MirrorJob {
   id: string;
@@ -38,4 +40,6 @@ export interface MirrorJob {
   /** @nullable */
   completedAt: string | null;
   archiveAvailable: boolean;
+  queueSummary: MirrorQueueSummary;
+  outcomes: MirrorOutcome[];
 }

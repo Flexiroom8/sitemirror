@@ -94,6 +94,16 @@ export type MirrorJobRecord = {
   sizeLimitReached: boolean;
 };
 
+export type MirrorArchiveManifest = {
+  schemaVersion: number;
+  jobId: string;
+  sourceUrl: string;
+  configuration: Record<string, unknown>;
+  summary: Record<string, unknown>;
+  redirects: Record<string, string>;
+  outcomes: MirrorOutcome[];
+};
+
 const MIRROR_USER_AGENT = "SiteMirror/1.0 (authorized archive)";
 const NAV_TIMEOUT_MS = 30_000;
 const BROWSER_INSTALL_TIMEOUT_MS = 120_000;
@@ -343,6 +353,10 @@ async function assertSafePublicUrl(rawUrl: string): Promise<URL> {
 }
 
 function publicJob(job: MirrorJobRecord) {
+  const outcomes = [...job.outcomes.values()];
+  const saved = outcomes.filter((outcome) => outcome.status === "saved").length;
+  const skipped = outcomes.filter((outcome) => outcome.status === "skipped").length;
+  const failed = outcomes.filter((outcome) => outcome.status === "failed").length;
   return {
     id: job.id,
     url: job.url,
@@ -370,6 +384,14 @@ function publicJob(job: MirrorJobRecord) {
     createdAt: job.createdAt,
     completedAt: job.completedAt,
     archiveAvailable: Boolean(job.archiveKey) && !job.archiveStorageFailed,
+    queueSummary: {
+      saved,
+      skipped,
+      failed,
+      discovered: outcomes.length,
+      pending: Math.max(0, job.pagesFound + job.assetsDownloaded + job.assetsSkipped + job.assetsFailed - outcomes.length),
+    },
+    outcomes,
   };
 }
 
@@ -543,6 +565,67 @@ async function writeArchiveReports(job: MirrorJobRecord): Promise<void> {
     fs.writeFile(path.join(job.outputDir, "report.json"), JSON.stringify(report, null, 2)),
     fs.writeFile(path.join(job.outputDir, "README.txt"), readme),
   ]);
+}
+
+async function readMirrorArchiveJson<T>(job: MirrorJobRecord, name: string): Promise<T> {
+  const file = await getMirrorPreviewFile(job, name);
+  return JSON.parse(await fs.readFile(file, "utf8")) as T;
+}
+
+export async function getMirrorArchiveManifest(job: MirrorJobRecord): Promise<MirrorArchiveManifest> {
+  return readMirrorArchiveJson<MirrorArchiveManifest>(job, "manifest.json");
+}
+
+export function getMirrorArchiveFiles(
+  manifest: MirrorArchiveManifest,
+  options: { search?: string; kind?: string; status?: string } = {},
+) {
+  const search = options.search?.trim().toLowerCase() ?? "";
+  return manifest.outcomes
+    .filter((outcome) => outcome.archivePath)
+    .filter((outcome) => !options.kind || outcome.kind === options.kind)
+    .filter((outcome) => !options.status || outcome.status === options.status)
+    .filter((outcome) => {
+      if (!search) return true;
+      return [outcome.archivePath, outcome.url, outcome.contentType, outcome.reason]
+        .filter(Boolean)
+        .some((value) => value!.toLowerCase().includes(search));
+    })
+    .map((outcome) => ({
+      path: outcome.archivePath!,
+      kind: outcome.kind,
+      url: outcome.url,
+      status: outcome.status,
+      contentType: outcome.contentType,
+      bytes: outcome.bytes,
+      reason: outcome.reason,
+      finalUrl: outcome.finalUrl,
+    }));
+}
+
+export async function getMirrorArchiveIntegrity(job: MirrorJobRecord) {
+  const manifest = await getMirrorArchiveManifest(job);
+  const outcomes = manifest.outcomes;
+  const warnings = outcomes
+    .filter((outcome) => outcome.status !== "saved")
+    .map((outcome) => ({
+      kind: outcome.kind,
+      url: outcome.url,
+      path: outcome.archivePath,
+      status: outcome.status,
+      reason: outcome.reason,
+      httpStatus: outcome.httpStatus,
+    }));
+  return {
+    valid: manifest.schemaVersion === 1 && manifest.jobId === job.id,
+    schemaVersion: manifest.schemaVersion,
+    fileCount: outcomes.filter((outcome) => outcome.archivePath).length,
+    savedCount: outcomes.filter((outcome) => outcome.status === "saved").length,
+    warningCount: warnings.length,
+    brokenPages: warnings.filter((warning) => warning.kind === "page").length,
+    brokenAssets: warnings.filter((warning) => warning.kind === "asset").length,
+    warnings,
+  };
 }
 
 function archiveObjectName(job: MirrorJobRecord): string {
@@ -2003,6 +2086,43 @@ export async function createMirrorJob(input: {
   jobs.set(id, job);
   scheduleJob(id);
   return job;
+}
+
+function comparableMirrorUrl(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    parsed.hash = "";
+    return parsed.href;
+  } catch {
+    return rawUrl.trim();
+  }
+}
+
+export function findActiveMirrorJob(url: string): MirrorJobRecord | undefined {
+  const comparable = comparableMirrorUrl(url);
+  return [...jobs.values()].find(
+    (job) =>
+      (job.status === "queued" || job.status === "running") &&
+      comparableMirrorUrl(job.url) === comparable,
+  );
+}
+
+export async function retryMirrorJob(id: string): Promise<MirrorJobRecord | undefined> {
+  const source = jobs.get(id);
+  if (!source) return undefined;
+  if (source.status === "queued" || source.status === "running") return source;
+  return createMirrorJob({
+    url: source.url,
+    maxPages: source.maxPages,
+    requestDelayMs: source.requestDelayMs,
+    respectRobotsTxt: source.respectRobotsTxt,
+    maxDepth: source.maxDepth,
+    includeAssets: source.includeAssets,
+    pathPrefix: source.pathPrefix,
+    excludePaths: source.excludePaths,
+    timeoutMs: source.timeoutMs,
+    maxTotalBytes: source.maxTotalBytes,
+  });
 }
 
 export function getMirrorJob(id: string): MirrorJobRecord | undefined {

@@ -86,7 +86,27 @@ export const ListMirrorJobsResponse = zod.object({
   "message": zod.string().nullable(),
   "createdAt": zod.coerce.date(),
   "completedAt": zod.string().nullable(),
-  "archiveAvailable": zod.boolean()
+  "archiveAvailable": zod.boolean(),
+  "queueSummary": zod.object({
+  "saved": zod.number(),
+  "skipped": zod.number(),
+  "failed": zod.number(),
+  "discovered": zod.number(),
+  "pending": zod.number()
+}),
+  "outcomes": zod.array(zod.object({
+  "kind": zod.enum(['page', 'asset']),
+  "url": zod.string(),
+  "status": zod.enum(['saved', 'skipped', 'failed']),
+  "httpStatus": zod.number().nullable(),
+  "contentType": zod.string().nullable(),
+  "finalUrl": zod.string().nullable(),
+  "archivePath": zod.string().nullable(),
+  "reason": zod.string().nullable(),
+  "attempts": zod.number(),
+  "bytes": zod.number(),
+  "updatedAt": zod.coerce.date()
+}))
 }))
 })
 
@@ -197,7 +217,27 @@ export const CreateMirrorJobResponse = zod.object({
   "message": zod.string().nullable(),
   "createdAt": zod.coerce.date(),
   "completedAt": zod.string().nullable(),
-  "archiveAvailable": zod.boolean()
+  "archiveAvailable": zod.boolean(),
+  "queueSummary": zod.object({
+  "saved": zod.number(),
+  "skipped": zod.number(),
+  "failed": zod.number(),
+  "discovered": zod.number(),
+  "pending": zod.number()
+}),
+  "outcomes": zod.array(zod.object({
+  "kind": zod.enum(['page', 'asset']),
+  "url": zod.string(),
+  "status": zod.enum(['saved', 'skipped', 'failed']),
+  "httpStatus": zod.number().nullable(),
+  "contentType": zod.string().nullable(),
+  "finalUrl": zod.string().nullable(),
+  "archivePath": zod.string().nullable(),
+  "reason": zod.string().nullable(),
+  "attempts": zod.number(),
+  "bytes": zod.number(),
+  "updatedAt": zod.coerce.date()
+}))
 })
 
 
@@ -265,7 +305,27 @@ export const GetMirrorJobResponse = zod.object({
   "message": zod.string().nullable(),
   "createdAt": zod.coerce.date(),
   "completedAt": zod.string().nullable(),
-  "archiveAvailable": zod.boolean()
+  "archiveAvailable": zod.boolean(),
+  "queueSummary": zod.object({
+  "saved": zod.number(),
+  "skipped": zod.number(),
+  "failed": zod.number(),
+  "discovered": zod.number(),
+  "pending": zod.number()
+}),
+  "outcomes": zod.array(zod.object({
+  "kind": zod.enum(['page', 'asset']),
+  "url": zod.string(),
+  "status": zod.enum(['saved', 'skipped', 'failed']),
+  "httpStatus": zod.number().nullable(),
+  "contentType": zod.string().nullable(),
+  "finalUrl": zod.string().nullable(),
+  "archivePath": zod.string().nullable(),
+  "reason": zod.string().nullable(),
+  "attempts": zod.number(),
+  "bytes": zod.number(),
+  "updatedAt": zod.coerce.date()
+}))
 })
 
 
@@ -333,7 +393,208 @@ export const CancelMirrorJobResponse = zod.object({
   "message": zod.string().nullable(),
   "createdAt": zod.coerce.date(),
   "completedAt": zod.string().nullable(),
-  "archiveAvailable": zod.boolean()
+  "archiveAvailable": zod.boolean(),
+  "queueSummary": zod.object({
+  "saved": zod.number(),
+  "skipped": zod.number(),
+  "failed": zod.number(),
+  "discovered": zod.number(),
+  "pending": zod.number()
+}),
+  "outcomes": zod.array(zod.object({
+  "kind": zod.enum(['page', 'asset']),
+  "url": zod.string(),
+  "status": zod.enum(['saved', 'skipped', 'failed']),
+  "httpStatus": zod.number().nullable(),
+  "contentType": zod.string().nullable(),
+  "finalUrl": zod.string().nullable(),
+  "archivePath": zod.string().nullable(),
+  "reason": zod.string().nullable(),
+  "attempts": zod.number(),
+  "bytes": zod.number(),
+  "updatedAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Start another run with the same mirror settings
+ */
+
+
+
+export const RetryMirrorJobParams = zod.object({
+  "id": zod.coerce.string().min(1)
+})
+
+export const retryMirrorJobResponsePagesFoundMultipleOf = 1;
+
+export const retryMirrorJobResponsePagesDownloadedMultipleOf = 1;
+
+export const retryMirrorJobResponsePagesSkippedMultipleOf = 1;
+
+export const retryMirrorJobResponsePagesFailedMultipleOf = 1;
+
+export const retryMirrorJobResponseAssetsDownloadedMultipleOf = 1;
+
+export const retryMirrorJobResponseAssetsSkippedMultipleOf = 1;
+
+export const retryMirrorJobResponseAssetsFailedMultipleOf = 1;
+
+export const retryMirrorJobResponseBytesDownloadedMultipleOf = 1;
+
+export const retryMirrorJobResponseMaxPagesMultipleOf = 1;
+
+export const retryMirrorJobResponseRequestDelayMsMultipleOf = 1;
+
+export const retryMirrorJobResponseMaxDepthMultipleOf = 1;
+
+export const retryMirrorJobResponseTimeoutMsMultipleOf = 1;
+
+export const retryMirrorJobResponseMaxTotalBytesMultipleOf = 1;
+
+
+
+export const RetryMirrorJobResponse = zod.object({
+  "id": zod.string(),
+  "url": zod.string(),
+  "status": zod.enum(['queued', 'running', 'completed', 'completed_with_warnings', 'failed', 'cancelled']),
+  "pagesFound": zod.number().multipleOf(retryMirrorJobResponsePagesFoundMultipleOf),
+  "pagesDownloaded": zod.number().multipleOf(retryMirrorJobResponsePagesDownloadedMultipleOf),
+  "pagesSkipped": zod.number().multipleOf(retryMirrorJobResponsePagesSkippedMultipleOf),
+  "pagesFailed": zod.number().multipleOf(retryMirrorJobResponsePagesFailedMultipleOf),
+  "assetsDownloaded": zod.number().multipleOf(retryMirrorJobResponseAssetsDownloadedMultipleOf),
+  "assetsSkipped": zod.number().multipleOf(retryMirrorJobResponseAssetsSkippedMultipleOf),
+  "assetsFailed": zod.number().multipleOf(retryMirrorJobResponseAssetsFailedMultipleOf),
+  "bytesDownloaded": zod.number().multipleOf(retryMirrorJobResponseBytesDownloadedMultipleOf),
+  "maxPages": zod.number().multipleOf(retryMirrorJobResponseMaxPagesMultipleOf),
+  "requestDelayMs": zod.number().multipleOf(retryMirrorJobResponseRequestDelayMsMultipleOf),
+  "respectRobotsTxt": zod.boolean(),
+  "maxDepth": zod.number().multipleOf(retryMirrorJobResponseMaxDepthMultipleOf).optional(),
+  "includeAssets": zod.boolean().optional(),
+  "pathPrefix": zod.string().optional(),
+  "excludePaths": zod.array(zod.string()).optional(),
+  "timeoutMs": zod.number().multipleOf(retryMirrorJobResponseTimeoutMsMultipleOf).optional(),
+  "maxTotalBytes": zod.number().multipleOf(retryMirrorJobResponseMaxTotalBytesMultipleOf).optional(),
+  "currentUrl": zod.string().nullable(),
+  "progressPhase": zod.enum(['queued', 'discovering', 'saving', 'downloading_assets', 'rewriting', 'packaging']),
+  "message": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "completedAt": zod.string().nullable(),
+  "archiveAvailable": zod.boolean(),
+  "queueSummary": zod.object({
+  "saved": zod.number(),
+  "skipped": zod.number(),
+  "failed": zod.number(),
+  "discovered": zod.number(),
+  "pending": zod.number()
+}),
+  "outcomes": zod.array(zod.object({
+  "kind": zod.enum(['page', 'asset']),
+  "url": zod.string(),
+  "status": zod.enum(['saved', 'skipped', 'failed']),
+  "httpStatus": zod.number().nullable(),
+  "contentType": zod.string().nullable(),
+  "finalUrl": zod.string().nullable(),
+  "archivePath": zod.string().nullable(),
+  "reason": zod.string().nullable(),
+  "attempts": zod.number(),
+  "bytes": zod.number(),
+  "updatedAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Read a sealed mirror archive manifest
+ */
+
+
+
+export const GetMirrorArchiveManifestParams = zod.object({
+  "id": zod.coerce.string().min(1)
+})
+
+export const GetMirrorArchiveManifestResponse = zod.object({
+  "schemaVersion": zod.number(),
+  "jobId": zod.string(),
+  "sourceUrl": zod.string(),
+  "configuration": zod.record(zod.string(), zod.unknown()),
+  "summary": zod.record(zod.string(), zod.unknown()),
+  "redirects": zod.record(zod.string(), zod.string()),
+  "outcomes": zod.array(zod.object({
+  "kind": zod.enum(['page', 'asset']),
+  "url": zod.string(),
+  "status": zod.enum(['saved', 'skipped', 'failed']),
+  "httpStatus": zod.number().nullable(),
+  "contentType": zod.string().nullable(),
+  "finalUrl": zod.string().nullable(),
+  "archivePath": zod.string().nullable(),
+  "reason": zod.string().nullable(),
+  "attempts": zod.number(),
+  "bytes": zod.number(),
+  "updatedAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Search files in a sealed mirror archive
+ */
+
+
+
+export const ListMirrorArchiveFilesParams = zod.object({
+  "id": zod.coerce.string().min(1)
+})
+
+export const ListMirrorArchiveFilesQueryParams = zod.object({
+  "search": zod.coerce.string().optional(),
+  "kind": zod.enum(['page', 'asset']).optional(),
+  "status": zod.enum(['saved', 'skipped', 'failed']).optional()
+})
+
+export const ListMirrorArchiveFilesResponse = zod.object({
+  "total": zod.number(),
+  "files": zod.array(zod.object({
+  "path": zod.string(),
+  "kind": zod.enum(['page', 'asset']),
+  "url": zod.string(),
+  "status": zod.enum(['saved', 'skipped', 'failed']),
+  "contentType": zod.string().nullable(),
+  "bytes": zod.number(),
+  "reason": zod.string().nullable(),
+  "finalUrl": zod.string().nullable()
+}))
+})
+
+
+/**
+ * @summary Inspect archive health and failed resources
+ */
+
+
+
+export const GetMirrorArchiveIntegrityParams = zod.object({
+  "id": zod.coerce.string().min(1)
+})
+
+export const GetMirrorArchiveIntegrityResponse = zod.object({
+  "valid": zod.boolean(),
+  "schemaVersion": zod.number(),
+  "fileCount": zod.number(),
+  "savedCount": zod.number(),
+  "warningCount": zod.number(),
+  "brokenPages": zod.number(),
+  "brokenAssets": zod.number(),
+  "warnings": zod.array(zod.object({
+  "kind": zod.string(),
+  "url": zod.string(),
+  "path": zod.string().nullable(),
+  "status": zod.string(),
+  "reason": zod.string().nullable(),
+  "httpStatus": zod.number().nullable()
+}))
 })
 
 

@@ -22,7 +22,11 @@ import type {
 import type {
   ErrorResponse,
   HealthStatus,
+  ListMirrorArchiveFiles200,
+  ListMirrorArchiveFilesParams,
   ListMirrorJobsParams,
+  MirrorArchiveManifest,
+  MirrorIntegrityReport,
   MirrorJob,
   MirrorJobInput,
   MirrorJobList
@@ -449,6 +453,323 @@ export const useCancelMirrorJob = <TError = ErrorType<ErrorResponse>,
       > => {
       return useMutation(getCancelMirrorJobMutationOptions(options));
     }
+
+export const getRetryMirrorJobUrl = (id: string,) => {
+
+
+
+
+  return `/api/mirror-jobs/${id}/retry`
+}
+
+/**
+ * @summary Start another run with the same mirror settings
+ */
+export const retryMirrorJob = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<MirrorJob> => {
+
+  return customFetch<MirrorJob>(getRetryMirrorJobUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRetryMirrorJobMutationKey = () => ['retryMirrorJob'] as const;
+
+export const getRetryMirrorJobMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryMirrorJob>>, TError,RetryMirrorJobMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof retryMirrorJob>>, TError,RetryMirrorJobMutationVariables, TContext> => {
+
+const mutationKey = getRetryMirrorJobMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof retryMirrorJob>>, RetryMirrorJobMutationVariables> = (props) => {
+          const {id} = props ?? {};
+
+          return  retryMirrorJob(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RetryMirrorJobMutationResult = NonNullable<Awaited<ReturnType<typeof retryMirrorJob>>>
+
+    export type RetryMirrorJobMutationError = ErrorType<ErrorResponse>
+    export type RetryMirrorJobMutationVariables = {id: string}
+
+    /**
+ * @summary Start another run with the same mirror settings
+ */
+export const useRetryMirrorJob = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryMirrorJob>>, TError,RetryMirrorJobMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof retryMirrorJob>>,
+        TError,
+        RetryMirrorJobMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRetryMirrorJobMutationOptions(options));
+    }
+
+export const getGetMirrorArchiveManifestUrl = (id: string,) => {
+
+
+
+
+  return `/api/mirror-jobs/${id}/archive/manifest`
+}
+
+/**
+ * @summary Read a sealed mirror archive manifest
+ */
+export const getMirrorArchiveManifest = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<MirrorArchiveManifest> => {
+
+  return customFetch<MirrorArchiveManifest>(getGetMirrorArchiveManifestUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMirrorArchiveManifestQueryKey = (id: string,) => {
+    return [
+    `/api/mirror-jobs/${id}/archive/manifest`
+    ] as const;
+    }
+
+
+export const getGetMirrorArchiveManifestQueryOptions = <TData = Awaited<ReturnType<typeof getMirrorArchiveManifest>>, TError = ErrorType<ErrorResponse>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMirrorArchiveManifest>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMirrorArchiveManifestQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMirrorArchiveManifest>>> = ({ signal }) => getMirrorArchiveManifest(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMirrorArchiveManifest>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMirrorArchiveManifestQueryResult = NonNullable<Awaited<ReturnType<typeof getMirrorArchiveManifest>>>
+export type GetMirrorArchiveManifestQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Read a sealed mirror archive manifest
+ */
+
+export function useGetMirrorArchiveManifest<TData = Awaited<ReturnType<typeof getMirrorArchiveManifest>>, TError = ErrorType<ErrorResponse>>(
+ id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMirrorArchiveManifest>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMirrorArchiveManifestQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListMirrorArchiveFilesUrl = (id: string,
+    params?: ListMirrorArchiveFilesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/mirror-jobs/${id}/archive/files?${stringifiedParams}` : `/api/mirror-jobs/${id}/archive/files`
+}
+
+/**
+ * @summary Search files in a sealed mirror archive
+ */
+export const listMirrorArchiveFiles = async (id: string,
+    params?: ListMirrorArchiveFilesParams, options?: Parameters<typeof customFetch>[1]): Promise<ListMirrorArchiveFiles200> => {
+
+  return customFetch<ListMirrorArchiveFiles200>(getListMirrorArchiveFilesUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMirrorArchiveFilesQueryKey = (id: string,
+    params?: ListMirrorArchiveFilesParams,) => {
+    return [
+    `/api/mirror-jobs/${id}/archive/files`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListMirrorArchiveFilesQueryOptions = <TData = Awaited<ReturnType<typeof listMirrorArchiveFiles>>, TError = ErrorType<ErrorResponse>>(id: string,
+    params?: ListMirrorArchiveFilesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMirrorArchiveFiles>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMirrorArchiveFilesQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMirrorArchiveFiles>>> = ({ signal }) => listMirrorArchiveFiles(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMirrorArchiveFiles>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListMirrorArchiveFilesQueryResult = NonNullable<Awaited<ReturnType<typeof listMirrorArchiveFiles>>>
+export type ListMirrorArchiveFilesQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Search files in a sealed mirror archive
+ */
+
+export function useListMirrorArchiveFiles<TData = Awaited<ReturnType<typeof listMirrorArchiveFiles>>, TError = ErrorType<ErrorResponse>>(
+ id: string,
+    params?: ListMirrorArchiveFilesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMirrorArchiveFiles>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListMirrorArchiveFilesQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetMirrorArchiveIntegrityUrl = (id: string,) => {
+
+
+
+
+  return `/api/mirror-jobs/${id}/archive/integrity`
+}
+
+/**
+ * @summary Inspect archive health and failed resources
+ */
+export const getMirrorArchiveIntegrity = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<MirrorIntegrityReport> => {
+
+  return customFetch<MirrorIntegrityReport>(getGetMirrorArchiveIntegrityUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMirrorArchiveIntegrityQueryKey = (id: string,) => {
+    return [
+    `/api/mirror-jobs/${id}/archive/integrity`
+    ] as const;
+    }
+
+
+export const getGetMirrorArchiveIntegrityQueryOptions = <TData = Awaited<ReturnType<typeof getMirrorArchiveIntegrity>>, TError = ErrorType<ErrorResponse>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMirrorArchiveIntegrity>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMirrorArchiveIntegrityQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMirrorArchiveIntegrity>>> = ({ signal }) => getMirrorArchiveIntegrity(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMirrorArchiveIntegrity>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMirrorArchiveIntegrityQueryResult = NonNullable<Awaited<ReturnType<typeof getMirrorArchiveIntegrity>>>
+export type GetMirrorArchiveIntegrityQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Inspect archive health and failed resources
+ */
+
+export function useGetMirrorArchiveIntegrity<TData = Awaited<ReturnType<typeof getMirrorArchiveIntegrity>>, TError = ErrorType<ErrorResponse>>(
+ id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMirrorArchiveIntegrity>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMirrorArchiveIntegrityQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getDownloadMirrorJobUrl = (id: string,) => {
 
