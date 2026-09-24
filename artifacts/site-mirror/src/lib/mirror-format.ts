@@ -14,3 +14,24 @@ export function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—';
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }
+
+export const MIRROR_PREFILL_KEY = 'site-mirror:prefill';
+
+export function saveMirrorPrefill(value: Record<string, unknown>): void {
+  try {
+    window.localStorage.setItem(MIRROR_PREFILL_KEY, JSON.stringify(value));
+  } catch {
+    // Local storage is optional; the next screen still remains usable.
+  }
+}
+
+export function readMirrorPrefill<T>(): T | null {
+  try {
+    const value = window.localStorage.getItem(MIRROR_PREFILL_KEY);
+    if (!value) return null;
+    window.localStorage.removeItem(MIRROR_PREFILL_KEY);
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}

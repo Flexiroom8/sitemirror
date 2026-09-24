@@ -20,6 +20,7 @@ import {
   ScanSearch,
   ShieldCheck,
   SlidersHorizontal,
+  Sparkles,
   TimerReset,
   Waypoints,
 } from 'lucide-react';
@@ -30,7 +31,7 @@ import {
   useCreateMirrorJob,
   useGetMirrorJob,
 } from '@workspace/api-client-react';
-import { formatBytes, formatDate } from '@/lib/mirror-format';
+import { formatBytes, formatDate, readMirrorPrefill } from '@/lib/mirror-format';
 
 const defaultForm: Required<MirrorJobInput> = {
   url: '',
@@ -44,6 +45,32 @@ const defaultForm: Required<MirrorJobInput> = {
   timeoutMs: 900_000,
   maxTotalBytes: 524_288_000,
 };
+
+const presets: Array<{
+  id: string;
+  label: string;
+  description: string;
+  values: Partial<typeof defaultForm>;
+}> = [
+  {
+    id: 'landing',
+    label: 'Single page',
+    description: 'Fast capture for one landing page',
+    values: { maxPages: 1, maxDepth: 0, includeAssets: true, timeoutMs: 300_000, maxTotalBytes: 100 * 1_048_576 },
+  },
+  {
+    id: 'site',
+    label: 'Small site',
+    description: 'A focused marketing or docs site',
+    values: { maxPages: 100, maxDepth: 3, includeAssets: true, timeoutMs: 900_000, maxTotalBytes: 500 * 1_048_576 },
+  },
+  {
+    id: 'archive',
+    label: 'Full archive',
+    description: 'More room for a deep, asset-heavy crawl',
+    values: { maxPages: 500, maxDepth: 6, includeAssets: true, timeoutMs: 1_800_000, maxTotalBytes: 1_024 * 1_048_576 },
+  },
+];
 
 
 function SiteMark({ compact = false }: { compact?: boolean }) {
@@ -102,7 +129,8 @@ function RecentJob({ job, isLoading, isError }: { job?: MirrorJob; isLoading: bo
 
 export default function MirrorHome() {
   const [, setLocation] = useLocation();
-  const [form, setForm] = useState(defaultForm);
+  const [form, setForm] = useState(() => ({ ...defaultForm, ...readMirrorPrefill<Partial<typeof defaultForm>>() }));
+  const [activePreset, setActivePreset] = useState('site');
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [excludePathsText, setExcludePathsText] = useState('');
   const [validationError, setValidationError] = useState('');
@@ -122,6 +150,11 @@ export default function MirrorHome() {
   }, []);
 
   const update = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => setForm((current) => ({ ...current, [key]: value }));
+  const applyPreset = (preset: (typeof presets)[number]) => {
+    setActivePreset(preset.id);
+    setForm((current) => ({ ...current, ...preset.values }));
+    setAdvancedOpen(preset.id !== 'landing');
+  };
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -168,6 +201,7 @@ export default function MirrorHome() {
       <main className="md:ml-[248px]">
         <header className="flex items-center justify-between border-b border-[hsl(var(--border))] bg-[hsl(var(--background)/.88)] px-5 py-4 backdrop-blur md:px-10">
           <div className="md:hidden"><SiteMark compact /></div>
+          <Link href="/history" className="ml-auto inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold text-[hsl(var(--muted-foreground))] transition-colors hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--primary))] md:hidden"><History className="h-3.5 w-3.5" />History</Link>
           <div className="hidden items-center gap-2 text-xs text-[hsl(var(--muted-foreground))] md:flex"><span className="h-1.5 w-1.5 rounded-full bg-[hsl(157_43%_40%)]" />Control room / New mirror</div>
           <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[.14em] text-[hsl(var(--muted-foreground))]"><span className="hidden sm:inline">Local archive protocol</span><span className="h-1 w-1 rounded-full bg-[hsl(var(--accent))]" />ready</div>
         </header>
@@ -182,6 +216,31 @@ export default function MirrorHome() {
             </div>
             <div className="absolute -bottom-16 -right-8 hidden h-48 w-48 rounded-full border border-[hsl(var(--accent)/.25)] md:block"><div className="absolute inset-7 rounded-full border border-[hsl(var(--accent)/.35)]"><div className="absolute inset-7 rounded-full bg-[hsl(var(--accent)/.11)]" /></div></div>
           </section>
+
+           <section aria-labelledby="quick-start-heading" className="mt-7">
+             <div className="mb-3 flex items-center gap-2">
+               <Sparkles className="h-4 w-4 text-[hsl(var(--accent-foreground))]" />
+               <h2 id="quick-start-heading" className="text-xs font-extrabold uppercase tracking-[.14em] text-[hsl(var(--muted-foreground))]">Quick start</h2>
+               <span className="text-[11px] text-[hsl(var(--muted-foreground))]">or tune every limit below</span>
+             </div>
+             <div className="grid gap-3 sm:grid-cols-3">
+               {presets.map((preset) => (
+                 <button
+                   key={preset.id}
+                   type="button"
+                   onClick={() => applyPreset(preset)}
+                   aria-pressed={activePreset === preset.id}
+                   className={`rounded-xl border p-4 text-left transition-[transform,border-color,background-color,box-shadow] hover:-translate-y-0.5 hover:border-[hsl(var(--accent-border))] ${activePreset === preset.id ? 'border-[hsl(var(--accent-border))] bg-[hsl(var(--accent)/.11)] shadow-[var(--shadow-sm)]' : 'border-[hsl(var(--border))] bg-[hsl(var(--card))]'}`}
+                 >
+                   <span className="flex items-center justify-between gap-3 text-sm font-bold">
+                     {preset.label}
+                     {activePreset === preset.id && <Check className="h-4 w-4 text-[hsl(var(--accent-foreground))]" />}
+                   </span>
+                   <span className="mt-1 block text-[11px] leading-4 text-[hsl(var(--muted-foreground))]">{preset.description}</span>
+                 </button>
+               ))}
+             </div>
+           </section>
 
           <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_350px]">
             <section className="animate-rise-in-delay rounded-[1.35rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-[var(--shadow-sm)] md:p-8">
@@ -210,6 +269,10 @@ export default function MirrorHome() {
                   <label className="sm:col-span-2 flex cursor-pointer items-start gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3.5"><input type="checkbox" checked={form.includeAssets} onChange={(event) => update('includeAssets', event.target.checked)} className="peer sr-only" /><span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] text-transparent peer-checked:border-[hsl(var(--accent-border))] peer-checked:bg-[hsl(var(--accent))] peer-checked:text-[hsl(var(--accent-foreground))]"><Check className="h-3.5 w-3.5" strokeWidth={3} /></span><span><span className="block text-xs font-bold">Collect same-origin assets</span><span className="mt-1 block text-[11px] text-[hsl(var(--muted-foreground))]">Download images, scripts, stylesheets, and media referenced by each page.</span></span></label>
                 </div>}
                 {(validationError || createError) && <div data-testid="status-create-error" className="rounded-xl border border-[hsl(var(--destructive)/.25)] bg-[hsl(var(--destructive)/.07)] px-4 py-3 text-xs font-semibold text-[hsl(var(--destructive))]">{validationError || createError?.error || 'The mirror could not be started. Check the URL and try again.'}</div>}
+                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.42)] px-4 py-3 text-[11px] text-[hsl(var(--muted-foreground))]">
+                   <span><strong className="text-[hsl(var(--foreground))]">{form.maxPages.toLocaleString()} pages</strong> · depth {form.maxDepth} · {form.includeAssets ? 'assets included' : 'pages only'}</span>
+                   <span className="font-mono uppercase tracking-[.1em]">{form.respectRobotsTxt ? 'robots aware' : 'robots unchecked'}</span>
+                 </div>
                 <button data-testid="button-start-mirror" type="submit" disabled={createJob.isPending} className="group flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--primary))] text-sm font-bold text-[hsl(var(--primary-foreground))] shadow-[0_5px_0_hsl(196_47%_14%)] transition-transform hover:-translate-y-0.5 active:translate-y-0 disabled:cursor-wait disabled:opacity-70">{createJob.isPending ? <><RefreshCw className="h-4 w-4 animate-spin" />Preparing mirror...</> : <>Start authorized mirror <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" /></>}</button>
               </form>
             </section>

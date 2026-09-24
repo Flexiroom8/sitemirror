@@ -130,6 +130,8 @@
     min-width: 320px;
   }
   button, input { font: inherit; }
+  button, a, [role='button'] { cursor: pointer; }
+  :focus-visible { outline: 3px solid hsl(var(--ring) / .75); outline-offset: 3px; }
 }
 
 @keyframes rise-in {
@@ -155,4 +157,13 @@
     linear-gradient(hsl(196 35% 26% / .06) 1px, transparent 1px),
     linear-gradient(90deg, hsl(196 35% 26% / .06) 1px, transparent 1px);
   background-size: 28px 28px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
 }

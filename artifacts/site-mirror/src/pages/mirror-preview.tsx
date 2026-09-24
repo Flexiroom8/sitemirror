@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
-import { ArrowLeft, CircleAlert, ExternalLink, LoaderCircle, Network, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, CircleAlert, ExternalLink, LoaderCircle } from 'lucide-react';
 import { Link, useParams } from 'wouter';
 import { getGetMirrorJobQueryKey, useGetMirrorJob } from '@workspace/api-client-react';
+import { MirrorHeader } from '@/components/mirror-shell';
 
 function PreviewSkeleton() {
   return (
@@ -72,20 +73,7 @@ export default function MirrorPreviewPage() {
   if (!canPreview) {
     return (
       <div className="min-h-[100dvh] bg-[hsl(var(--background))]">
-        <header className="border-b border-[hsl(var(--border))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]">
-          <div className="mx-auto flex max-w-[1220px] items-center justify-between px-5 py-4 md:px-10">
-            <Link href="/" className="flex items-center gap-3">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]">
-                <Network className="h-4 w-4" />
-              </span>
-              <span className="text-sm font-extrabold tracking-[-.03em]">site mirror</span>
-            </Link>
-            <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[.14em] text-[hsl(var(--primary-foreground)/.6)]">
-              <ShieldCheck className="h-3.5 w-3.5 text-[hsl(var(--accent))]" />
-              authorized control room
-            </div>
-          </div>
-        </header>
+        <MirrorHeader />
         <main className="mx-auto flex min-h-[calc(100dvh-73px)] max-w-[1220px] items-center justify-center px-5 py-10 md:px-10">
           <section className="w-full max-w-lg rounded-[1.5rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-8 text-center shadow-[var(--shadow-md)]">
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[hsl(var(--secondary))] text-[hsl(var(--primary))]">
@@ -120,20 +108,7 @@ export default function MirrorPreviewPage() {
 
   return (
     <div className="min-h-[100dvh] bg-[hsl(var(--background))]">
-      <header className="border-b border-[hsl(var(--border))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]">
-        <div className="mx-auto flex max-w-[1220px] items-center justify-between gap-4 px-5 py-4 md:px-10">
-          <Link href={`/jobs/${encodeURIComponent(id)}`} className="flex items-center gap-3">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]">
-              <Network className="h-4 w-4" />
-            </span>
-            <span className="text-sm font-extrabold tracking-[-.03em]">site mirror</span>
-          </Link>
-          <div className="hidden items-center gap-2 font-mono text-[10px] uppercase tracking-[.14em] text-[hsl(var(--primary-foreground)/.6)] sm:flex">
-            <ShieldCheck className="h-3.5 w-3.5 text-[hsl(var(--accent))]" />
-            snapshot preview
-          </div>
-        </div>
-      </header>
+      <MirrorHeader preview />
 
       <main className="mx-auto max-w-[1220px] px-5 py-7 md:px-10 md:py-9">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-4">

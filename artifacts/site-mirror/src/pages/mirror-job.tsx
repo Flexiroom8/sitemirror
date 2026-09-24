@@ -13,8 +13,8 @@ import {
   LoaderCircle,
   LockKeyhole,
   MonitorPlay,
-  Network,
   PauseCircle,
+  RotateCcw,
   RefreshCw,
   ShieldCheck,
   Square,
@@ -26,9 +26,11 @@ import {
   useCancelMirrorJob,
   useDownloadMirrorJob,
   useGetMirrorJob,
+  useRetryMirrorJob,
   type MirrorJob,
 } from '@workspace/api-client-react';
 import { formatBytes, formatDateTime as formatDate } from '@/lib/mirror-format';
+import { MirrorHeader, phaseLabel } from '@/components/mirror-shell';
 
 
 function statusCopy(status: MirrorJob['status']) {
@@ -67,8 +69,10 @@ export default function MirrorJobPage() {
   const [, setLocation] = useLocation();
   const id = params.id ?? '';
   const [cancelError, setCancelError] = useState('');
+  const [retryError, setRetryError] = useState('');
   const query = useGetMirrorJob(id, { query: { queryKey: getGetMirrorJobQueryKey(id), enabled: Boolean(id), refetchInterval: (queryData) => queryData.state.data?.status === 'queued' || queryData.state.data?.status === 'running' ? 1800 : false } });
   const cancelJob = useCancelMirrorJob();
+  const retryJob = useRetryMirrorJob();
   const download = useDownloadMirrorJob(id, { query: { queryKey: getDownloadMirrorJobQueryKey(id), enabled: false } });
   const job = query.data;
   const progress = useMemo(() => {
@@ -90,6 +94,7 @@ export default function MirrorJobPage() {
   const copy = statusCopy(job.status);
   const isActive = job.status === 'running' || job.status === 'queued';
   const canDownload = job.status === 'completed' || job.status === 'completed_with_warnings';
+  const canRetry = !isActive;
   const cancel = () => {
     if (!window.confirm('Stop this mirror job? No additional requests will be made.')) return;
     setCancelError('');
@@ -108,27 +113,36 @@ export default function MirrorJobPage() {
       URL.revokeObjectURL(url);
     }
   };
+  const retry = () => {
+    setRetryError('');
+    retryJob.mutate({ id: job.id }, {
+      onSuccess: (nextJob) => setLocation(`/jobs/${nextJob.id}`),
+      onError: () => setRetryError('This mirror could not be started again. Try from the new mirror screen.'),
+    });
+  };
 
   return (
     <div className="min-h-[100dvh] bg-[hsl(var(--background))]">
-      <header className="border-b border-[hsl(var(--border))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]">
-        <div className="mx-auto flex max-w-[1220px] items-center justify-between px-5 py-4 md:px-10"><Link href="/" data-testid="link-home-from-job" className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]"><Network className="h-4 w-4" /></span><span className="text-sm font-extrabold tracking-[-.03em]">site mirror</span></Link><div className="flex items-center gap-5"><Link href="/history" data-testid="link-history-from-job" className="text-xs font-bold text-[hsl(var(--primary-foreground)/.7)] transition-colors hover:text-[hsl(var(--primary-foreground))]">Job history</Link><div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[.14em] text-[hsl(var(--primary-foreground)/.6)]"><ShieldCheck className="h-3.5 w-3.5 text-[hsl(var(--accent))]" />authorized control room</div></div></div>
-      </header>
+      <MirrorHeader />
       <main className="mx-auto max-w-[1220px] px-5 py-8 md:px-10 md:py-11">
         <div className="mb-7 flex flex-wrap items-center justify-between gap-4"><Link href="/" data-testid="link-back-new-mirror" className="inline-flex items-center gap-2 text-xs font-bold text-[hsl(var(--muted-foreground))] transition-colors hover:text-[hsl(var(--primary))]"><ArrowLeft className="h-3.5 w-3.5" />New mirror</Link><p className="font-mono text-[10px] uppercase tracking-[.15em] text-[hsl(var(--muted-foreground))]">Job <span className="text-[hsl(var(--primary))]">{job.id.slice(0, 12)}</span></p></div>
         <section className="animate-rise-in overflow-hidden rounded-[1.55rem] bg-[hsl(var(--primary))] p-6 text-[hsl(var(--primary-foreground))] shadow-[var(--shadow-lg)] md:p-9">
-           <div className="flex flex-col gap-7 lg:flex-row lg:items-end lg:justify-between"><div className="min-w-0"><div className="mb-4 flex flex-wrap items-center gap-3"><StatusBadge status={job.status} /><span className="font-mono text-[10px] text-[hsl(var(--primary-foreground)/.5)]">started {formatDate(job.createdAt)}</span></div><h1 className="max-w-3xl truncate text-3xl font-extrabold tracking-[-.055em] md:text-5xl">{copy.title}</h1><p className="mt-3 max-w-xl text-sm leading-6 text-[hsl(var(--primary-foreground)/.67)]">{copy.body}</p></div><div className="flex shrink-0 flex-wrap justify-end gap-2">{canDownload && <button data-testid="button-download-mirror" onClick={downloadArchive} disabled={download.isFetching} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[hsl(var(--accent))] px-5 text-xs font-extrabold text-[hsl(var(--accent-foreground))] shadow-[0_4px_0_hsl(39_65%_37%)] transition-transform hover:-translate-y-0.5 disabled:opacity-70">{download.isFetching ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}{download.isFetching ? 'Preparing archive...' : 'Download .zip'}</button>}{canDownload && job.archiveAvailable && <Link href={`/jobs/${encodeURIComponent(job.id)}/preview`} data-testid="button-preview-mirror" className="inline-flex h-11 items-center gap-2 rounded-xl border border-[hsl(var(--primary-foreground)/.25)] bg-[hsl(var(--primary-foreground)/.07)] px-5 text-xs font-bold text-[hsl(var(--primary-foreground))] transition-colors hover:bg-[hsl(var(--primary-foreground)/.14)]"><MonitorPlay className="h-4 w-4" />Preview mirror</Link>}{isActive ? <button data-testid="button-cancel-mirror" onClick={cancel} disabled={cancelJob.isPending} className="inline-flex h-11 items-center gap-2 rounded-xl border border-[hsl(var(--primary-foreground)/.25)] bg-[hsl(var(--primary-foreground)/.07)] px-5 text-xs font-bold text-[hsl(var(--primary-foreground))] transition-colors hover:bg-[hsl(var(--primary-foreground)/.14)] disabled:opacity-60"><Square className="h-3 w-3 fill-current" />{cancelJob.isPending ? 'Stopping...' : 'Stop mirror'}</button> : null}</div></div>
+           <div className="flex flex-col gap-7 lg:flex-row lg:items-end lg:justify-between"><div className="min-w-0"><div className="mb-4 flex flex-wrap items-center gap-3"><StatusBadge status={job.status} /><span className="font-mono text-[10px] text-[hsl(var(--primary-foreground)/.5)]">started {formatDate(job.createdAt)}</span></div><h1 className="max-w-3xl truncate text-3xl font-extrabold tracking-[-.055em] md:text-5xl">{copy.title}</h1><p className="mt-3 max-w-xl text-sm leading-6 text-[hsl(var(--primary-foreground)/.67)]">{copy.body}</p></div><div className="flex shrink-0 flex-wrap justify-end gap-2">{canDownload && <button data-testid="button-download-mirror" onClick={downloadArchive} disabled={download.isFetching} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[hsl(var(--accent))] px-5 text-xs font-extrabold text-[hsl(var(--accent-foreground))] shadow-[0_4px_0_hsl(39_65%_37%)] transition-transform hover:-translate-y-0.5 disabled:opacity-70">{download.isFetching ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}{download.isFetching ? 'Preparing archive...' : 'Download .zip'}</button>}{canDownload && job.archiveAvailable && <Link href={`/jobs/${encodeURIComponent(job.id)}/preview`} data-testid="button-preview-mirror" className="inline-flex h-11 items-center gap-2 rounded-xl border border-[hsl(var(--primary-foreground)/.25)] bg-[hsl(var(--primary-foreground)/.07)] px-5 text-xs font-bold text-[hsl(var(--primary-foreground))] transition-colors hover:bg-[hsl(var(--primary-foreground)/.14)]"><MonitorPlay className="h-4 w-4" />Preview mirror</Link>}{canRetry && <button data-testid="button-rerun-mirror" onClick={retry} disabled={retryJob.isPending} className="inline-flex h-11 items-center gap-2 rounded-xl border border-[hsl(var(--primary-foreground)/.25)] bg-[hsl(var(--primary-foreground)/.07)] px-5 text-xs font-bold text-[hsl(var(--primary-foreground))] transition-colors hover:bg-[hsl(var(--primary-foreground)/.14)] disabled:opacity-60"><RotateCcw className="h-4 w-4" />{retryJob.isPending ? 'Starting...' : 'Run again'}</button>}{isActive ? <button data-testid="button-cancel-mirror" onClick={cancel} disabled={cancelJob.isPending} className="inline-flex h-11 items-center gap-2 rounded-xl border border-[hsl(var(--primary-foreground)/.25)] bg-[hsl(var(--primary-foreground)/.07)] px-5 text-xs font-bold text-[hsl(var(--primary-foreground))] transition-colors hover:bg-[hsl(var(--primary-foreground)/.14)] disabled:opacity-60"><Square className="h-3 w-3 fill-current" />{cancelJob.isPending ? 'Stopping...' : 'Stop mirror'}</button> : null}</div></div>
+           {isActive && <div className="mt-8 border-t border-[hsl(var(--primary-foreground)/.16)] pt-6"><div className="mb-3 flex items-end justify-between gap-4"><div><p className="font-mono text-[10px] uppercase tracking-[.16em] text-[hsl(var(--primary-foreground)/.54)]">Pages collected</p><p className="mt-1 font-mono text-2xl">{job.pagesDownloaded} <span className="text-sm text-[hsl(var(--primary-foreground)/.48)]">/ {job.maxPages}</span></p></div><span data-testid="text-job-progress" className="font-mono text-2xl text-[hsl(var(--accent))]">{progress}%</span></div><div className="h-2 overflow-hidden rounded-full bg-[hsl(var(--primary-foreground)/.12)]"><div className="h-full rounded-full bg-[hsl(var(--accent))] transition-[width] duration-700 ease-out" style={{ width: `${Math.max(progress, job.status === 'queued' ? 4 : progress)}%` }} /></div><div className="mt-3 flex flex-wrap items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-[.12em] text-[hsl(var(--primary-foreground)/.5)]"><span className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--accent))] signal-dot" />{phaseLabel(job.progressPhase)}</span><span>updates every 1.8 seconds</span></div></div>}
           {isActive && <div className="mt-8 border-t border-[hsl(var(--primary-foreground)/.16)] pt-6"><div className="mb-3 flex items-end justify-between gap-4"><div><p className="font-mono text-[10px] uppercase tracking-[.16em] text-[hsl(var(--primary-foreground)/.54)]">Pages collected</p><p className="mt-1 font-mono text-2xl">{job.pagesDownloaded} <span className="text-sm text-[hsl(var(--primary-foreground)/.48)]">/ {job.maxPages}</span></p></div><span data-testid="text-job-progress" className="font-mono text-2xl text-[hsl(var(--accent))]">{progress}%</span></div><div className="h-2 overflow-hidden rounded-full bg-[hsl(var(--primary-foreground)/.12)]"><div className="h-full rounded-full bg-[hsl(var(--accent))] transition-[width] duration-700 ease-out" style={{ width: `${Math.max(progress, job.status === 'queued' ? 4 : progress)}%` }} /></div><div className="mt-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[.12em] text-[hsl(var(--primary-foreground)/.5)]"><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--accent))] signal-dot" />updates every 1.8 seconds</div></div>}
            {(job.status === 'completed' || job.status === 'completed_with_warnings') && <div className="mt-8 flex items-center gap-3 border-t border-[hsl(var(--primary-foreground)/.16)] pt-6 text-sm text-[hsl(var(--primary-foreground)/.72)]"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-[hsl(157_36%_77%/.25)] text-[hsl(157_60%_76%)]"><Check className="h-4 w-4" /></span>Archive sealed on {formatDate(job.completedAt)}</div>}
           {job.message && <div data-testid="status-job-message" className={`mt-6 flex gap-2 rounded-xl border px-4 py-3 text-xs ${job.status === 'failed' ? 'border-[hsl(var(--destructive)/.35)] bg-[hsl(var(--destructive)/.13)] text-[hsl(5_80%_84%)]' : 'border-[hsl(var(--primary-foreground)/.17)] bg-[hsl(var(--primary-foreground)/.06)] text-[hsl(var(--primary-foreground)/.72)]'}`}><CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />{job.message}</div>}
         </section>
         {cancelError && <div data-testid="status-cancel-error" className="mt-4 rounded-xl border border-[hsl(var(--destructive)/.25)] bg-[hsl(var(--destructive)/.07)] px-4 py-3 text-xs font-semibold text-[hsl(var(--destructive))]">{cancelError}</div>}
+         {retryError && <div data-testid="status-retry-error" className="mt-4 rounded-xl border border-[hsl(var(--destructive)/.25)] bg-[hsl(var(--destructive)/.07)] px-4 py-3 text-xs font-semibold text-[hsl(var(--destructive))]">{retryError}</div>}
 
         <section className="mt-7 grid grid-cols-2 gap-3 md:grid-cols-4">
           <Stat icon={FileCode2} label="Pages found" value={job.pagesFound.toLocaleString()} testId="text-pages-found" />
           <Stat icon={FileArchive} label="Pages downloaded" value={job.pagesDownloaded.toLocaleString()} testId="text-pages-downloaded" />
           <Stat icon={HardDrive} label="Assets downloaded" value={job.assetsDownloaded.toLocaleString()} testId="text-assets-downloaded" />
-          <Stat icon={Gauge} label="Archive size" value={formatBytes(job.bytesDownloaded)} testId="text-bytes-downloaded" />
+           <Stat icon={Gauge} label="Archive size" value={formatBytes(job.bytesDownloaded)} testId="text-bytes-downloaded" />
+           <Stat icon={Check} label="Skipped" value={(job.pagesSkipped + job.assetsSkipped).toLocaleString()} detail="scope" testId="text-items-skipped" />
+           <Stat icon={CircleAlert} label="Failed" value={(job.pagesFailed + job.assetsFailed).toLocaleString()} detail="review" testId="text-items-failed" />
         </section>
 
         <div className="mt-7 grid gap-7 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,.65fr)]">
